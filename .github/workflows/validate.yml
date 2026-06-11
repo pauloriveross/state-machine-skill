@@ -9,6 +9,7 @@ jobs:
         with: { node-version: '20' }
       - name: Validate examples against script
         run: |
+          shopt -s nullglob
           for file in examples/*.json; do
-            [ -f "$file" ] && node scripts/validate-model.js "$file"
+            node scripts/validate-model.js "$file"
           done
