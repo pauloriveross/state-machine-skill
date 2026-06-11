@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>state-machine — No more impossible states</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset & Base ── */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:#0D0F12;color:#E2E8F0;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  pre,code,.font-mono{font-family:'JetBrains Mono',monospace}
+
+  /* ── Colors ── */
+  :root{
+    --bg:#0D0F12;
+    --surface:#13161B;
+    --surface-hover:#1A1F26;
+    --border:#1E2530;
+    --text:#E2E8F0;
+    --muted:#8892A4;
+    --violet:#7C3AED;
+    --violet-glow:rgba(124,58,237,0.25);
+    --cyan:#06B6D4;
+    --cyan-glow:rgba(6,182,212,0.2);
+    --red:#EF4444;
+    --green:#22C55E;
+  }
+
+  /* ── Utilities ── */
+  .container{max-width:1120px;margin:0 auto;padding:0 24px}
+  .section{padding:96px 0}
+  .section-title{font-size:14px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .section-heading{font-size:36px;font-weight:700;line-height:1.2;margin-bottom:16px}
+  @media(max-width:768px){.section-heading{font-size:28px}.section{padding:64px 0}}
+
+  /* ── Glass card ── */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;transition:transform .25s ease,box-shadow .25s ease, border-color .25s ease}
+  .card:hover{transform:translateY(-4px);box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+  .card-glow:hover{border-color:var(--violet);box-shadow:0 0 24px var(--violet-glow)}
+
+  /* ── Buttons ── */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:8px;font-weight:600;font-size:15px;cursor:pointer;border:none;transition:all .2s ease}
+  .btn-primary{background:var(--violet);color:#fff;box-shadow:0 0 20px var(--violet-glow)}
+  .btn-primary:hover{transform:scale(1.03);box-shadow:0 0 32px var(--violet-glow)}
+  .btn-outline{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .btn-outline:hover{background:var(--surface-hover);border-color:var(--muted)}
+
+  /* ── Animations ── */
+  @keyframes nodePulse{0%,100%{opacity:1;r:18}50%{opacity:0.6;r:22}}
+  @keyframes nodeGlow{0%,100%{filter:drop-shadow(0 0 4px var(--violet))}50%{filter:drop-shadow(0 0 12px var(--violet))}}
+  @keyframes drawArrow{to{stroke-dashoffset:0}}
+  @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.visible{opacity:1;transform:translateY(0)}
+  .reveal-delay-1{transition-delay:.1s}
+  .reveal-delay-2{transition-delay:.2s}
+  .reveal-delay-3{transition-delay:.3s}
+
+  .arrow-path{stroke-dasharray:600;stroke-dashoffset:600;animation:drawArrow 2s ease forwards}
+  .arrow-path-2{animation-delay:.3s}
+  .arrow-path-3{animation-delay:.6s}
+  .arrow-path-4{animation-delay:.9s}
+
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}
+    .reveal{opacity:1;transform:none}
+    .arrow-path{stroke-dashoffset:0}
+  }
+
+  /* ── Nav ── */
+  nav{position:fixed;top:0;width:100%;z-index:100;background:rgba(13,15,18,0.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+  nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .nav-links{display:flex;gap:32px;font-size:14px;font-weight:500;color:var(--muted)}
+  .nav-links a:hover{color:var(--text)}
+
+  /* ── Hero ── */
+  .hero{min-height:100vh;display:flex;align-items:center;position:relative;overflow:hidden;padding-top:64px}
+  .hero-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0.15;pointer-events:none}
+  .hero-content{position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+  .hero-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--cyan);padding:6px 12px;border:1px solid var(--cyan);border-radius:999px;margin-bottom:24px}
+  .hero-left{max-width:520px}
+  .hero-right{justify-self:end;width:100%;max-width:440px}
+  .hero h1{font-size:56px;font-weight:800;line-height:1.1;letter-spacing:-0.03em;margin-bottom:16px}
+  .hero h1 em{color:var(--violet);font-style:italic}
+  .hero p{font-size:17px;color:var(--muted);margin-bottom:28px}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+  .hero-install-label{font-size:12px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+  .hero-compat{margin-top:20px;display:flex;gap:16px;font-size:13px;color:var(--muted)}
+  .hero-compat span{display:flex;align-items:center;gap:4px}
+  .hero-compat-dot{width:5px;height:5px;border-radius:50%;background:var(--violet)}
+  .hero-compat-dot.cyan{background:var(--cyan)}
+  .hero-compat-dot.amber{background:#F59E0B}
+  .hero-compat-dot.green{background:var(--green)}
+  @media(max-width:900px){.hero-content{grid-template-columns:1fr;gap:48px;text-align:center}.hero-left{max-width:none}.hero-right{justify-self:center}.hero p{margin-left:auto;margin-right:auto}.hero-actions{justify-content:center}}
+  @media(max-width:768px){.hero h1{font-size:36px}.hero{min-height:90vh}}
+
+  /* ── State Diagram SVG nodes ── */
+  .svg-node-pulse{animation:nodePulse 2.5s ease-in-out infinite;transform-origin:center}
+  .svg-node-glow{animation:nodeGlow 2.5s ease-in-out infinite}
+  .svg-node:nth-child(2) .svg-node-pulse{animation-delay:.4s}
+  .svg-node:nth-child(3) .svg-node-pulse{animation-delay:.8s}
+  .svg-node:nth-child(4) .svg-node-pulse{animation-delay:1.2s}
+
+  /* ── Problem/Solution ── */
+  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:768px){.split-grid{grid-template-columns:1fr}}
+  .code-block{border-radius:8px;padding:16px;overflow-x:auto;font-size:13px;line-height:1.7}
+  .code-block-red{background:rgba(239,68,68,0.06);border-left:3px solid var(--red)}
+  .code-block-green{background:rgba(34,197,94,0.06);border-left:3px solid var(--green)}
+
+  /* ── Verb grid ── */
+  .verb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  @media(max-width:768px){.verb-grid{grid-template-columns:1fr}}
+  .verb-icon{width:56px;height:56px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;margin-bottom:16px;border:1px solid var(--border)}
+
+  /* ── Terminal ── */
+  .terminal{border-radius:12px;overflow:hidden;border:1px solid var(--border);background:#080A0D}
+  .terminal-header{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border)}
+  .terminal-dot{width:12px;height:12px;border-radius:50%}
+  .terminal-dot:nth-child(1){background:#EF4444}
+  .terminal-dot:nth-child(2){background:#F59E0B}
+  .terminal-dot:nth-child(3){background:#22C55E}
+  .terminal-title{flex:1;text-align:center;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+  .terminal-body{padding:20px 24px;font-family:'JetBrains Mono',monospace;font-size:14px;line-height:1.8;min-height:200px;color:#CBD5E1}
+  .cursor::after{content:'█';animation:blink 1s step-end infinite;color:var(--violet)}
+  .cursor-done::after{content:none}
+  .terminal-output{opacity:0;transition:opacity .8s ease}
+  .terminal-output.show{opacity:1}
+
+  /* ── Compat logos ── */
+  .compat-grid{display:flex;gap:32px;justify-content:center;flex-wrap:wrap}
+  .compat-item{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600;color:var(--muted);padding:12px 20px;border:1px solid var(--border);border-radius:8px;transition:all .2s ease}
+  .compat-item:hover{color:var(--text);border-color:var(--muted);transform:translateY(-2px)}
+  .compat-dot{width:8px;height:8px;border-radius:50%;background:var(--violet)}
+
+  /* ── Install snippet ── */
+  .snippet-wrapper{max-width:560px;margin:0 auto}
+  .snippet{display:flex;align-items:center;background:#080A0D;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .snippet-code{padding:14px 20px;flex:1;font-family:'JetBrains Mono',monospace;font-size:15px;color:#CBD5E1;user-select:all}
+  .snippet-code span{color:var(--muted)}
+  .snippet-copy{padding:14px 20px;background:var(--surface);border-left:1px solid var(--border);cursor:pointer;font-size:14px;font-weight:600;color:var(--muted);transition:all .15s ease;white-space:nowrap;font-family:Inter,sans-serif}
+  .snippet-copy:hover{color:var(--text);background:var(--surface-hover)}
+  .snippet-copy.copied{color:var(--green)}
+
+  /* ── Footer ── */
+  footer{border-top:1px solid var(--border);padding:48px 0;margin-top:96px}
+  footer .container{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+  footer .links{display:flex;gap:24px;font-size:14px;color:var(--muted)}
+  footer .links a:hover{color:var(--text)}
+  .footer-badge{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<!-- ─── Nav ─── -->
+<nav>
+  <div class="container">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:18px">
+      <span style="color:var(--violet)">&#9632;</span> state-machine
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#demo">Demo</a>
+      <a href="https://github.com" target="_blank">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Hero ─── -->
+<section class="hero">
+  <div class="hero-bg">
+    <svg width="600" height="500" viewBox="0 0 600 500">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="var(--violet)"/>
+        </marker>
+        <marker id="arr-cyan" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 Z" fill="var(--cyan)"/>
+        </marker>
+      </defs>
+
+      <!-- Arrows (stroke-dasharray animated) -->
+      <path class="arrow-path" d="M150,250 Q230,150 300,160" fill="none" stroke="var(--violet)" stroke-width="2" marker-end="url(#arr)"/>
+      <path class="arrow-path arrow-path-2" d="M300,200 Q300,250 300,300" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr-cyan)"/>
+      <path class="arrow-path arrow-path-3" d="M300,340 Q230,380 150,380" fill="none" stroke="var(--violet)" stroke-width="2" marker-end="url(#arr)"/>
+      <path class="arrow-path arrow-path-4" d="M450,250 Q530,150 300,160" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr-cyan)"/>
+
+      <!-- Nodes -->
+      <g class="svg-node">
+        <circle class="svg-node-pulse" cx="150" cy="250" r="18" fill="none" stroke="var(--violet)" stroke-width="2.5" style="transform-origin:150px 250px"/>
+        <text x="150" y="290" font-family="'JetBrains Mono',monospace" font-size="11" fill="var(--muted)" text-anchor="middle">CLOSED</text>
+      </g>
+      <g class="svg-node">
+        <circle class="svg-node-pulse" cx="300" cy="120" r="18" fill="none" stroke="var(--cyan)" stroke-width="2.5" style="transform-origin:300px 120px"/>
+        <text x="300" y="160" font-family="'JetBrains Mono',monospace" font-size="11" fill="var(--muted)" text-anchor="middle">LOADING</text>
+      </g>
+      <g class="svg-node">
+        <circle class="svg-node-pulse" cx="300" cy="340" r="18" fill="none" stroke="var(--violet)" stroke-width="2.5" style="transform-origin:300px 340px"/>
+        <text x="300" y="380" font-family="'JetBrains Mono',monospace" font-size="11" fill="var(--muted)" text-anchor="middle">ERROR</text>
+      </g>
+      <g class="svg-node">
+        <circle class="svg-node-pulse" cx="450" cy="250" r="18" fill="none" stroke="var(--cyan)" stroke-width="2.5" style="transform-origin:450px 250px"/>
+        <text x="450" y="290" font-family="'JetBrains Mono',monospace" font-size="11" fill="var(--muted)" text-anchor="middle">SUCCESS</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="container hero-content">
+    <div class="hero-left">
+      <div class="hero-badge">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:nodePulse 2s infinite"></span>
+        v1.0.0 — Available Now
+      </div>
+      <h1>No more <em>impossible</em> states</h1>
+      <p>Model UI components as finite state machines before writing code. Compatible with Claude Code, Cursor, Windsurf, and OpenCode.</p>
+      <div class="hero-actions">
+        <a href="#demo" class="btn btn-primary">See examples</a>
+        <a href="https://github.com" target="_blank" class="btn btn-outline">GitHub</a>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="hero-install-label">Quick install</div>
+      <div class="snippet" id="snippet">
+        <div class="snippet-code"><span>$</span> npx skills add state-machine-skill</div>
+        <button class="snippet-copy" id="copy-btn">Copy</button>
+      </div>
+      <div class="hero-compat">
+        <span><span class="hero-compat-dot"></span> Claude Code</span>
+        <span><span class="hero-compat-dot cyan"></span> Cursor</span>
+        <span><span class="hero-compat-dot amber"></span> Windsurf</span>
+        <span><span class="hero-compat-dot green"></span> OpenCode</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Problem / Solution ─── -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="reveal" style="text-align:center;margin-bottom:48px">
+      <div class="section-title">From chaos to clarity</div>
+      <h2 class="section-heading">Three booleans create eight states.<br>Most of them are bugs.</h2>
+    </div>
+
+    <div class="split-grid">
+      <div class="card reveal reveal-delay-1" style="border-color:rgba(239,68,68,0.2)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px;color:var(--red)">&#10007;</span>
+          <h3 style="font-size:18px;font-weight:700">The Boolean Mess</h3>
+        </div>
+        <div class="code-block code-block-red">
+          <pre style="color:var(--red)">// 3 booleans = 8 possible states, 5 invalid
+const [isLoading, setLoading] = useState(false);
+const [isError, setError] = useState(false);
+const [data, setData] = useState(null);
+
+if (isLoading && isError) {
+  // ❌ Impossible: both loading and error
+}
+if (isLoading && data) {
+  // ❌ Impossible: loading with data
+}
+if (!isLoading && !isError && !data) {
+  // Idle — but is it really?
+}</pre>
+        </div>
+      </div>
+
+      <div class="card reveal reveal-delay-2" style="border-color:rgba(34,197,94,0.2)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <span style="font-size:18px;color:var(--green)">&#10003;</span>
+          <h3 style="font-size:18px;font-weight:700">The State Machine Way</h3>
+        </div>
+        <div class="code-block code-block-green">
+          <pre style="color:var(--green)">// 4 states, all valid
+type State = 'Idle' | 'Loading' | 'Success' | 'Error';
+const [state, setState] = useState&lt;State&gt;('Idle');
+
+// Impossible states structurally eliminated
+switch (state) {
+  case 'Idle':     return &lt;Empty /&gt;;
+  case 'Loading':  return &lt;Spinner /&gt;;
+  case 'Success':  return &lt;Content /&gt;;
+  case 'Error':    return &lt;ErrorView /&gt;;
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Three Verbs ─── -->
+<section class="section" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)" id="features">
+  <div class="container">
+    <div class="reveal" style="text-align:center;margin-bottom:48px">
+      <div class="section-title">Three verbs</div>
+      <h2 class="section-heading">Model. Implement. Audit.</h2>
+    </div>
+
+    <div class="verb-grid">
+      <div class="card card-glow reveal reveal-delay-1">
+        <div class="verb-icon" style="color:var(--violet);border-color:rgba(124,58,237,0.3)">[→]</div>
+        <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Model</h3>
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">From natural language to a formal FSM: named states, guarded transitions, actions, and invariants. 35 validation gates catch every mistake before code is written.</p>
+        <div style="margin-top:16px;padding:10px 12px;background:#080A0D;border-radius:6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--muted)">
+          <span style="color:var(--violet)">$</span> state-machine model <span style="color:var(--cyan)">"a modal with..."</span>
+        </div>
+      </div>
+
+      <div class="card card-glow reveal reveal-delay-2">
+        <div class="verb-icon" style="color:var(--cyan);border-color:rgba(6,182,212,0.3)">{&gt;}</div>
+        <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Implement</h3>
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">Code is derived from the model, not the other way around. React, Vue, Svelte, or vanilla. Every component carries the guarantee stamp: no impossible states.</p>
+        <div style="margin-top:16px;padding:10px 12px;background:#080A0D;border-radius:6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--muted)">
+          <span style="color:var(--violet)">$</span> state-machine implement <span style="color:var(--cyan)">react "...</span>
+        </div>
+      </div>
+
+      <div class="card card-glow reveal reveal-delay-3">
+        <div class="verb-icon" style="color:#F59E0B;border-color:rgba(245,158,11,0.3)">||=</div>
+        <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Audit</h3>
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">Reverse-engineer existing code into a model, detect boolean explosions, identify unhandled transitions, and produce a severity-ranked punch list.</p>
+        <div style="margin-top:16px;padding:10px 12px;background:#080A0D;border-radius:6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--muted)">
+          <span style="color:var(--violet)">$</span> state-machine audit <span style="color:var(--cyan)">./src/Modal.tsx</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Terminal Demo ─── -->
+<section class="section" id="demo">
+  <div class="container">
+    <div class="reveal" style="text-align:center;margin-bottom:48px">
+      <div class="section-title">See it in action</div>
+      <h2 class="section-heading">Describe. Model. Generate.</h2>
+    </div>
+
+    <div class="terminal reveal" style="max-width:720px;margin:0 auto">
+      <div class="terminal-header">
+        <span class="terminal-dot"></span>
+        <span class="terminal-dot"></span>
+        <span class="terminal-dot"></span>
+        <span class="terminal-title">state-machine — bash</span>
+      </div>
+      <div class="terminal-body" id="terminal">
+        <div><span style="color:var(--violet)">$</span> <span id="typewriter-text"></span><span class="cursor" id="cursor-el"></span></div>
+        <div id="terminal-output" class="terminal-output" style="margin-top:12px">
+          <div style="color:var(--muted)">Analyzing description...</div>
+          <div style="color:var(--green);margin-top:4px">&#10003; 6 states identified</div>
+          <div style="color:var(--green)">&#10003; 9 transitions mapped</div>
+          <div style="color:var(--green)">&#10003; 3 guards defined</div>
+          <div style="color:var(--green)">&#10003; 5 actions extracted</div>
+          <div style="color:var(--cyan);margin-top:8px">Output: model.json</div>
+          <div style="margin-top:12px;padding:12px;background:#080A0D;border-radius:6px;border:1px solid var(--border);font-size:13px;line-height:1.8;color:#CBD5E1">
+┌────────┐ TRIGGER ┌──────────┐ &lt;done&gt; ┌──────────┐<br>
+│ Closed │────────&gt;│ Opening  │───────&gt;│ Loading  │<br>
+└────────┘         └──────────┘        └────┬─────┘<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├────FETCH_SUCCESS→ Success<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└────FETCH_ERROR→ Error
+          </div>
+          <div style="color:var(--muted);margin-top:8px;font-style:italic">Ready to implement.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Compatibility ─── -->
+<section class="section" style="padding-top:0">
+  <div class="container reveal">
+    <div style="text-align:center;margin-bottom:40px">
+      <div class="section-title">Works everywhere</div>
+      <h2 class="section-heading" style="font-size:24px">Compatible with every major AI agent</h2>
+    </div>
+    <div class="compat-grid">
+      <div class="compat-item"><span class="compat-dot"></span> Claude Code</div>
+      <div class="compat-item"><span class="compat-dot" style="background:var(--cyan)"></span> Cursor</div>
+      <div class="compat-item"><span class="compat-dot" style="background:#F59E0B"></span> Windsurf</div>
+      <div class="compat-item"><span class="compat-dot" style="background:var(--green)"></span> OpenCode</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Footer ─── -->
+<footer>
+  <div class="container">
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700">
+      <span style="color:var(--violet)">&#9632;</span> state-machine
+      <span class="footer-badge">
+        <img src="https://img.shields.io/npm/v/state-machine-skill?color=7C3AED&label=npm" alt="npm version" style="display:inline">
+      </span>
+      <span class="footer-badge">MIT</span>
+    </div>
+    <div class="links">
+      <a href="https://github.com" target="_blank">GitHub</a>
+      <a href="https://www.npmjs.com/package/state-machine-skill" target="_blank">npm</a>
+      <a href="#">Changelog</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function() {
+  // ── Reduced motion check ──
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── Scroll reveal with IntersectionObserver ──
+  const revealEls = document.querySelectorAll('.reveal');
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  revealEls.forEach(el => revealObserver.observe(el));
+
+  // If reduced motion, show everything immediately
+  if (prefersReducedMotion) {
+    revealEls.forEach(el => el.classList.add('visible'));
+  }
+
+  // ── Terminal typewriter ──
+  const text = 'state-machine model "a modal with async submit"';
+  const typewriterEl = document.getElementById('typewriter-text');
+  const cursorEl = document.getElementById('cursor-el');
+  const outputEl = document.getElementById('terminal-output');
+  let i = 0;
+  let typingStarted = false;
+
+  function typeChar() {
+    if (i < text.length) {
+      typewriterEl.textContent += text.charAt(i);
+      i++;
+      const delay = prefersReducedMotion ? 0 : (text.charAt(i-1) === ' ' ? 40 : 60);
+      setTimeout(typeChar, delay);
+    } else {
+      cursorEl.classList.remove('cursor');
+      cursorEl.classList.add('cursor-done');
+      setTimeout(() => {
+        outputEl.classList.add('show');
+      }, prefersReducedMotion ? 0 : 400);
+    }
+  }
+
+  const terminalObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && !typingStarted) {
+        typingStarted = true;
+        if (prefersReducedMotion) {
+          typewriterEl.textContent = text;
+          cursorEl.classList.remove('cursor');
+          cursorEl.classList.add('cursor-done');
+          outputEl.classList.add('show');
+        } else {
+          typeChar();
+        }
+        terminalObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.3 });
+  terminalObserver.observe(document.getElementById('terminal'));
+
+  // ── Copy to clipboard ──
+  const copyBtn = document.getElementById('copy-btn');
+  copyBtn.addEventListener('click', async function() {
+    const text = 'npx skills add state-machine-skill';
+    try {
+      await navigator.clipboard.writeText(text);
+      this.textContent = 'Copied!';
+      this.classList.add('copied');
+      setTimeout(() => {
+        this.textContent = 'Copy';
+        this.classList.remove('copied');
+      }, 2000);
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      this.textContent = 'Copied!';
+      setTimeout(() => { this.textContent = 'Copy'; }, 2000);
+    }
+  });
+})();
+</script>
+</body>
+</html>

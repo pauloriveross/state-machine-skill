@@ -1,0 +1,32 @@
+{
+  "name": "state-machine-skill",
+  "version": "1.0.0",
+  "description": "AI agent skill: model UI components as finite state machines before coding. Claude Code · Cursor · Windsurf · OpenCode",
+  "keywords": [
+    "claude-code", "agent-skill", "SKILL.md", "state-machine",
+    "xstate", "finite-state-machine", "cursor", "windsurf",
+    "opencode", "ai-coding", "ui-patterns"
+  ],
+  "main": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/",
+    "examples/",
+    "scripts/"
+  ],
+  "scripts": {
+    "validate": "node scripts/validate-model.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pariveross/state-machine-skill"
+  },
+  "homepage": "https://pariveross.github.io/state-machine-skill",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "projectId": "7087733627362356275",
+  "title": "state-machine-skill",
+  "deviceType": "MOBILE",
+  "designTheme": {},
+  "screens": {
+    "state-machine-landing": {
+      "id": "380a17921e684c58acf1c07552ccb1ca",
+      "sourceScreen": "projects/7087733627362356275/screens/380a17921e684c58acf1c07552ccb1ca",
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844
+    },
+    "screen_1781190825155": {
+      "id": "ef2c620dc8114909a36f5a4319a1b8d7",
+      "sourceScreen": "projects/7087733627362356275/screens/ef2c620dc8114909a36f5a4319a1b8d7",
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844
+    }
+  },
+  "updateTime": "2026-06-11T15:13:45.155Z"
+}
