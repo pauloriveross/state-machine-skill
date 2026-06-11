@@ -1,0 +1,56 @@
+{
+  "id": "auth-flow",
+  "initial": "Unauthenticated",
+  "states": {
+    "Unauthenticated": {
+      "type": "compound",
+      "initial": "Idle",
+      "states": {
+        "Idle": {
+          "type": "atomic",
+          "on": {
+            "LOGIN": { "target": "Authenticating", "guard": "hasCredentials", "actions": ["postLogin"] }
+          }
+        },
+        "Authenticating": {
+          "type": "atomic",
+          "on": {
+            "LOGIN_SUCCESS": { "target": "#auth-flow.Authenticated.Active", "actions": ["setSession"] },
+            "LOGIN_MFA_REQUIRED": { "target": "MfaRequired", "actions": ["setMfaChallenge"] },
+            "LOGIN_ERROR": { "target": "Idle", "actions": ["setError"] }
+          }
+        },
+        "MfaRequired": {
+          "type": "atomic",
+          "on": {
+            "MFA_SUBMIT": { "target": "Authenticating", "guard": "hasMfaCode", "actions": ["postMfa"] },
+            "MFA_CANCEL": { "target": "Idle", "actions": ["cancelMfa"] }
+          }
+        }
+      }
+    },
+    "Authenticated": {
+      "type": "compound",
+      "initial": "Active",
+      "states": {
+        "Active": {
+          "type": "atomic",
+          "on": {
+            "REFRESH_TOKEN": { "target": "Refreshing", "guard": "isSessionStale", "actions": ["doRefresh"] },
+            "LOGOUT": { "target": "#auth-flow.Unauthenticated.Idle", "actions": ["clearSession"] },
+            "SESSION_EXPIRED": { "target": "#auth-flow.Unauthenticated.Idle", "actions": ["clearSession", "setExpiredMessage"] }
+          }
+        },
+        "Refreshing": {
+          "type": "atomic",
+          "on": {
+            "REFRESH_SUCCESS": { "target": "Active", "actions": ["setToken"] },
+            "REFRESH_FAIL": { "target": "#auth-flow.Unauthenticated.Idle", "actions": ["clearSession", "setExpiredMessage"] },
+            "LOGOUT": { "target": "#auth-flow.Unauthenticated.Idle", "actions": ["clearSession"] },
+            "SESSION_EXPIRED": { "target": "#auth-flow.Unauthenticated.Idle", "actions": ["clearSession", "setExpiredMessage"] }
+          }
+        }
+      }
+    }
+  }
+}

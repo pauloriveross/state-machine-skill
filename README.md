@@ -97,7 +97,7 @@ This component **cannot** enter a state that was not explicitly modeled.
 | **Cursor** | Copy `SKILL.md` body → `.cursor/rules/state-machine.mdc`, references → `.cursor/rules/state-machine/` |
 | **Windsurf** | `cp SKILL.md .windsurf/rules/state-machine.md` + `cp -r references .windsurf/rules/state-machine-references/` |
 | **OpenCode** | `cp -r * .agent/skills/state-machine/` |
-| **Manual** | `npx openskills install state-machine-skill` |
+| **Manual** | Copy `SKILL.md` + `references/` into agent's skill directory |
 
 Then use it:
 
@@ -110,95 +110,106 @@ displays content on success or an error on failure, and closes on Escape
 
 ## 4 worked examples
 
-Each example walks through the full pipeline: natural language → formal model → ASCII diagram →
-production code → unit tests → XState v5 mapping.
+Each example follows the same 4-section structure: behavior specification → structural JSON contract →
+ASCII diagram → production implementation using `createLightMachine` from `src/core/fsm.ts`.
 
 <details>
 <summary><b>📋 Modal with async loading</b></summary>
 
 ```
-                    ┌─────────────────────────────────────────────┐
-                    │                  CLOSE                      │
-                    v                                             │
-┌────────┐ TRIGGER ┌──────────┐ <done> ┌──────────┐             │
-│ Closed │────────>│ Opening  │───────>│ Loading  │             │
-└────────┘         └──┬───────┘        └────┬─────┘             │
-                      │                     │                   │
-                      │ CLOSE     ┌─────────┼───────┐           │
-                      v           v         v       │           │
-                  ┌────────┐ ┌─────────┐ ┌─────────┐ │          │
-                  │Closing │ │ Success │ │  Error  │ │          │
-                  └───┬────┘ └────┬────┘ └────┬────┘ │          │
-                      │          │           │      │          │
-                      └──────────┴───────────┴──────┘          │
-                                 <done>                         │
-                                 v                              │
-                             ┌────────┐                         │
-                             │ Closed │─────────────────────────┘
-                             └────────┘
+┌────────┐ TRIGGER  ┌─────────┐ FETCH_SUCCESS ┌─────────┐
+│ Closed │─────────>│ Loading │──────────────>│ Success │
+└────────┘          └────┬────┘               └────┬────┘
+                         │                         │ CLOSE
+                   CLOSE │                         v
+                         │                    ┌─────────┐
+                         └───────────────────>│  Closed  │
+                                              └─────────┘
 ```
 
-Full example: [`examples/modal.md`](examples/modal.md)
+Full example: [`examples/modal.md`](examples/modal.md) — 4 states, 5 events, 7 transitions
 </details>
 
 <details>
 <summary><b>📋 Multi-step registration form</b></summary>
 
 ```
-┌────────┐        ┌────────┐        ┌────────┐        ┌────────────┐
-│ Step1  │───────>│ Step2  │───────>│ Step3  │───────>│ Submitting │
-│ Idle   │        │ Idle   │        │ Idle   │        └──────┬─────┘
-│ Dirty  │        │ Dirty  │        │Accepting│               │
-│Validat.│        │Validat.│        └────────┘     ┌─────────┼─────────┐
-└───┬────┘        └───┬────┘                       v         v         v
-    │ PREV             │ PREV                   ┌─────────┐ ┌─────────┐
-    └──────────────────┘                        │ Success │ │  Error  │
-                                                └─────────┘ └────┬────┘
-                                                                  │ RETRY
-                                                                  v
-                                                             ┌────────────┐
-                                                             │ Submitting │
-                                                             └────────────┘
+┌────────┐  NEXT   ┌────────┐  NEXT   ┌────────┐  SUBMIT
+│ Step1  │────────>│ Step2  │────────>│ Step3  │────────────┐
+└───┬────┘         └───┬────┘         └────────┘            │
+    │ PREV              │ PREV                               │
+    └───────────────────┘                                    │
+                              ┌────────────┐                 │
+                              │ Submitting │◄────────────────┘
+                              └──────┬─────┘
+                         ┌───────────┼──────────┐
+                         v           v          │
+                    ┌─────────┐ ┌─────────┐     │
+                    │ Success │ │  Error  │─────┘
+                    └─────────┘ └────┬────┘
+                                     │ RETRY
+                                     v
+                                 ┌────────────┐
+                                 │ Submitting │
+                                 └────────────┘
 ```
 
-Full example: [`examples/multistep-form.md`](examples/multistep-form.md)
+Full example: [`examples/multistep-form.md`](examples/multistep-form.md) — 7 states, 8 events, 11 transitions
 </details>
 
 <details>
 <summary><b>📋 Toggle with optimistic update</b></summary>
 
 ```
-┌────────┐      ┌────────────┐ CONFIRM ┌────────┐
-│  Off   │─────>│ PendingOn  │───────>│   On   │
-└───┬────┘      └──────┬─────┘        └───┬────┘
-    │                  │ REJECT            │
-    │                  v                   │
-    │              ┌───────┐               │
-    └─────────────>│ Error │<──────────────┘
-                   └───────┘
+     ┌────────┐      ┌────────────┐ CONFIRM ┌────────┐
+     │  Off   │─────>│ PendingOn  │───────>│   On   │
+     └───┬────┘      └──────┬─────┘        └───┬────┘
+         │                  │ REJECT            │
+         │                  v                   │
+         │              ┌───────┐               │
+         └─────────────>│ Error │<──────────────┘
+                        └───┬───┘
+                      RETRY  │  DISMISS
+                             v
+                        ┌────────┐
+                        │Pending │
+                        └────────┘
 ```
 
-Full example: [`examples/toggle-async.md`](examples/toggle-async.md)
+Full example: [`examples/toggle-async.md`](examples/toggle-async.md) — 5 states, 5 events, 8 transitions
 </details>
 
 <details>
 <summary><b>📋 Auth flow with MFA</b></summary>
 
 ```
-┌───────────────────┐          ┌───────────────────┐
-│  Unauthenticated  │          │   Authenticated   │
-│  ┌──────┐         │          │  ┌────────┐       │
-│  │ Idle │──LOGIN─>│          │  │ Active │       │
-│  └──────┘         │          │  └───┬────┘       │
-│                   │          │      │ REFRESH    │
-│  ┌────────────┐   │          │      v            │
-│  │Authenticate│   │          │  ┌────────┐      │
-│  │  ──→ MFA   │   │          │  │Refresh │      │
-│  └────────────┘   │          │  └────────┘      │
-└───────────────────┘          └──────────────────┘
+┌──────────────────────────────────────────┐
+│ Unauthenticated                          │
+│  ┌────────┐  LOGIN     ┌──────────────┐ │
+│  │  Idle  │───────────>│ Authenticating│ │
+│  └────────┘<────────────│              │ │
+│       ^       LOGIN_ERR └──────┬───────┘ │
+│       │ MFA_CANCEL    LOGIN_MFA│         │
+│       │                 ┌──────v───────┐ │
+│       └─────────────────│ MfaRequired  │ │
+│                  MFA_SUBMIT(hasMfaCode) │ │
+└──────────────────────────────────────────┘
+                    │ LOGIN_SUCCESS
+                    v
+┌──────────────────────────────────────────┐
+│ Authenticated                            │
+│  ┌────────┐  REFRESH_TOKEN ┌────────────┐│
+│  │ Active │───────────────>│ Refreshing  ││
+│  └───┬────┘<───────────────│            ││
+│      │    REFRESH_SUCCESS  └──────┬─────┘│
+│      │                    REFRESH_FAIL   │
+│      └──────────────────────────────┘    │
+│  LOGOUT → Unauthenticated.Idle           │
+│  SESSION_EXPIRED → Unauthenticated.Idle  │
+└──────────────────────────────────────────┘
 ```
 
-Full example: [`examples/auth-flow.md`](examples/auth-flow.md)
+Full example: [`examples/auth-flow.md`](examples/auth-flow.md) — HFSM with compound states, 3+2 child states, 13 events, 16 transitions
 </details>
 
 ---
@@ -254,45 +265,39 @@ See [`references/xstate-compat.md`](references/xstate-compat.md) for the full ma
 
 ---
 
-## Reference library
+## Project structure
 
 | File | Contents |
 |------|----------|
-| [`SKILL.md`](SKILL.md) | Router — entry point for all agents |
-| [`references/verb-dispatch.md`](references/verb-dispatch.md) | Exact instructions for model, implement, audit |
+| [`SKILL.md`](SKILL.md) | Mandatory execution protocol for AI agents |
+| [`src/core/fsm.ts`](src/core/fsm.ts) | Injectable micro-runtime (`createLightMachine`) |
+| [`scripts/validate-model.js`](scripts/validate-model.js) | Zero-dep model validator — gates 01–13 + graph structural check |
+| [`scripts/ascii-viz.js`](scripts/ascii-viz.js) | ASCII transition diagram renderer |
+| [`scripts/audit-processor.js`](scripts/audit-processor.js) | Boolean flag analyzer for legacy code audit |
+| [`schemas/fsm.schema.json`](schemas/fsm.schema.json) | Canonical JSON Schema for hierarchical FSM models |
+| [`references/verb-dispatch.md`](references/verb-dispatch.md) | Output format for model, implement, audit |
 | [`references/state-theory.md`](references/state-theory.md) | FSM/HFSM fundamentals applied to UI |
 | [`references/component-patterns.md`](references/component-patterns.md) | 12 canonical patterns with models and invariants |
 | [`references/impossible-states.md`](references/impossible-states.md) | 35 anti-patterns with elimination strategies |
 | [`references/slop-gates.md`](references/slop-gates.md) | 38 validation gates every output must pass |
 | [`references/xstate-compat.md`](references/xstate-compat.md) | Mapping every pattern to XState v5 |
 | [`references/framework-adapters.md`](references/framework-adapters.md) | React, Vue, Svelte, Vanilla adapters |
+| [`examples/`](examples/) | 4 worked examples (modal, toggle, form, auth) |
 
 ---
 
-## Validation script (CI-ready)
+## Scripts (CI-ready)
 
-```bash
-npx validate-state-machine path/to/model.json
-# or: npm run validate -- path/to/model.json
-```
+| Script | Purpose |
+|--------|---------|
+| `node scripts/validate-model.js model.json` | Validates model against gates 01–13 + graph structural check |
+| `node scripts/validate-model.js model.json --light` | Fast-track: skips warnings, compact diagram |
+| `node scripts/ascii-viz.js model.json` | ASCII transition diagram standalone |
+| `node scripts/audit-processor.js file.tsx` | Detects boolean flag explosion in legacy code |
 
-Zero dependencies. Runs gates 01–13. Exit code 0 = valid, 1 = invalid with gate report.
+Zero dependencies. Exit code 0 = valid, 1 = invalid with gate report.
 
-**Fast-track mode** (omits linguistic warnings, compact output):
-```bash
-npm run validate -- path/to/model.json --light
-```
-
-**ASCII diagram standalone** (no validation, just the graph):
-```bash
-node scripts/ascii-viz.js path/to/model.json
-```
-
-New in 1.1.0:
-- **Gates 11–13**: validates `actions` node, transition action references, state lifecycle hooks (`onEnter`/`onExit`)
-- **State objects**: states can be `{ name, onEnter, onExit, type }` instead of plain strings
-- **--light flag**: fast-track validation skips warnings, renders compact diagram
-- **ASCII visualizer**: `scripts/ascii-viz.js` draws transition graphs in the terminal
+**Auto-detects both flat format** (state array + transitions) and **hierarchical format** (nested `states` per `schemas/fsm.schema.json`). The hierarchical format supports compound states with `initial`, `#machineId.State.SubState` cross-hierarchy targets, guards, and actions.
 
 ---
 

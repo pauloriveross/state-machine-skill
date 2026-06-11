@@ -1,0 +1,45 @@
+{
+  "id": "multistep-form",
+  "initial": "Step1",
+  "states": {
+    "Step1": {
+      "type": "atomic",
+      "on": {
+        "NEXT": { "target": "Step2", "guard": "isStep1Valid", "actions": ["saveStep1"] },
+        "CANCEL": { "target": "Cancelled" }
+      }
+    },
+    "Step2": {
+      "type": "atomic",
+      "on": {
+        "NEXT": { "target": "Step3", "guard": "isStep2Valid", "actions": ["saveStep2"] },
+        "PREV": { "target": "Step1", "actions": ["restoreStep1"] },
+        "CANCEL": { "target": "Cancelled" }
+      }
+    },
+    "Step3": {
+      "type": "atomic",
+      "on": {
+        "SUBMIT": { "target": "Submitting", "guard": "isAccepted", "actions": ["submitRegistration"] },
+        "PREV": { "target": "Step2", "actions": ["restoreStep2"] },
+        "CANCEL": { "target": "Cancelled" }
+      }
+    },
+    "Submitting": {
+      "type": "atomic",
+      "on": {
+        "SUBMIT_SUCCESS": { "target": "Success", "actions": ["onSuccess"] },
+        "SUBMIT_ERROR": { "target": "Error", "actions": ["setServerError"] }
+      }
+    },
+    "Success": { "type": "final" },
+    "Error": {
+      "type": "atomic",
+      "on": {
+        "RETRY": { "target": "Submitting", "actions": ["submitRegistration"] },
+        "CANCEL": { "target": "Cancelled" }
+      }
+    },
+    "Cancelled": { "type": "final" }
+  }
+}

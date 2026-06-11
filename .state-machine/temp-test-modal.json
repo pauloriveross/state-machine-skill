@@ -1,0 +1,34 @@
+{
+  "id": "async-modal",
+  "initial": "Closed",
+  "states": {
+    "Closed": {
+      "type": "atomic",
+      "on": {
+        "TRIGGER": { "target": "Loading" }
+      }
+    },
+    "Loading": {
+      "type": "atomic",
+      "onEnter": ["fetchData"],
+      "on": {
+        "FETCH_SUCCESS": { "target": "Success", "actions": ["storeData"] },
+        "FETCH_ERROR": { "target": "Error", "actions": ["logError"] },
+        "CLOSE": { "target": "Closed", "actions": ["abortFetch"] }
+      }
+    },
+    "Success": {
+      "type": "atomic",
+      "on": {
+        "CLOSE": { "target": "Closed", "actions": ["clearData"] }
+      }
+    },
+    "Error": {
+      "type": "atomic",
+      "on": {
+        "RETRY": { "target": "Loading" },
+        "CLOSE": { "target": "Closed" }
+      }
+    }
+  }
+}

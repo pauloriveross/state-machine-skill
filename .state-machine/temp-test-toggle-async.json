@@ -1,0 +1,39 @@
+{
+  "id": "async-toggle",
+  "initial": "Off",
+  "states": {
+    "Off": {
+      "type": "atomic",
+      "on": {
+        "TOGGLE": { "target": "PendingOn", "guard": "isOnline", "actions": ["setOptimistic", "patchServer"] }
+      }
+    },
+    "PendingOn": {
+      "type": "atomic",
+      "on": {
+        "CONFIRM": { "target": "On", "actions": ["onChange"] },
+        "REJECT": { "target": "Error", "actions": ["rollback", "setError"] }
+      }
+    },
+    "On": {
+      "type": "atomic",
+      "on": {
+        "TOGGLE": { "target": "PendingOff", "guard": "isOnline", "actions": ["setOptimistic", "patchServer"] }
+      }
+    },
+    "PendingOff": {
+      "type": "atomic",
+      "on": {
+        "CONFIRM": { "target": "Off", "actions": ["onChange"] },
+        "REJECT": { "target": "Error", "actions": ["rollback", "setError"] }
+      }
+    },
+    "Error": {
+      "type": "atomic",
+      "on": {
+        "DISMISS": { "target": "Off", "actions": ["clearError"] },
+        "RETRY": { "target": "PendingOn", "guard": "isOnline", "actions": ["patchServer"] }
+      }
+    }
+  }
+}

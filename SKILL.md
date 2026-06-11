@@ -20,12 +20,28 @@ Model before you build. Every UI bug is a state you never modeled.
 | `implement` | NL / existing model → code + tests + embedded model comment | Ready to generate production code |
 | `audit` | File path → reconstructed model + impossible state analysis + punch list | Debugging or inheriting existing code |
 
-## Protocol
+## Mandatory Execution Protocol for the Agent (AI)
 
-1. **Load**: `references/verb-dispatch.md` (output format) + component pattern from `references/component-patterns.md` + applicable gates from `references/slop-gates.md` (1–13 model, 1–23 implement, 24–38 audit) + framework adapter from `references/framework-adapters.md` (implement only)
-2. **Run all applicable gates** before emitting output
-3. **If any gate fails**: stop, report gate number + problem + fix, do not proceed
-4. **Fast-track**: `node scripts/validate-model.js model.json --light` skips linguistic warnings, keeps ASCII diagram for ≤6 states
+You MUST strictly follow this algorithmic workflow for any user command:
+
+### `model` Verb Execution
+1. **Generate Structure**: Translate the user's description into a structured JSON that strictly conforms to `schemas/fsm.schema.json`. Save temporarily to `.state-machine/temp-model.json`.
+2. **Self-Validation**: Immediately run `node scripts/validate-model.js .state-machine/temp-model.json`.
+3. **Error Handling**: 
+   - If the command fails (Exit code 1), read the script output, re-model the JSON fixing the broken gate, and repeat step 2.
+   - Do NOT ask the user for help or show intermediate code until the script returns Exit code 0.
+4. **Final Output**: Generate the markdown block specified in `references/verb-dispatch.md` including the validated JSON and the ASCII diagram produced by `node scripts/ascii-viz.js .state-machine/temp-model.json`.
+
+### `implement` Verb Execution
+1. **Read Contract**: Take the JSON validated in the prior step or provided by the user.
+2. **Inject Runtime**: Copy the base code from `src/core/fsm.ts` directly into the user's component directory (e.g., `components/ui/fsm.ts`) if it does not exist.
+3. **Generate Component**: Generate the UI component coupling state exclusively through the `createLightMachine` hook/function.
+4. **Compile Tests**: Write a unit test file (`.test.ts` / `.test.js`) that sequentially simulates 100% of the JSON transitions and verifies the resulting state.
+
+### `audit` Verb Execution
+1. **Scan Code**: Search the user's file for reactive variables (`useState`, `ref`, boolean fields).
+2. **Generate Matrix**: Run an internal bit-combinatorics simulation ($2^n$) over those booleans.
+3. **Write Punch List**: Identify which combinations have no visual representation or coherent logic.
 
 ## Reference Library
 
@@ -37,6 +53,7 @@ Model before you build. Every UI bug is a state you never modeled.
 | `references/slop-gates.md` | 38 validation gates (model 1–13, code 14–23, audit 24–38) |
 | `references/framework-adapters.md` | useMachine(config, implementations) for React/Vue/Svelte/Vanilla |
 | `references/xstate-compat.md` | XState v5 mapping |
+| `schemas/fsm.schema.json` | Canonical JSON Schema for FSM models (hierarchical format) |
 | `references/state-theory.md` | FSM/HFSM theory applied to UI |
 | `examples/` | modal.md, toggle-async.md, multistep-form.md, auth-flow.md |
 
