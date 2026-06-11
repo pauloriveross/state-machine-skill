@@ -40,7 +40,7 @@
   .section-heading{font-size:36px;font-weight:700;line-height:1.2;margin-bottom:16px}
 
   /* ── Glass card ── */
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;transition:transform .25s ease,box-shadow .25s ease, border-color .25s ease}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;transition:transform .25s ease,box-shadow .25s ease, border-color .25s ease;overflow:hidden}
   .card:hover{transform:translateY(-4px);box-shadow:0 8px 32px rgba(0,0,0,0.3)}
   .card-glow:hover{border-color:var(--violet);box-shadow:0 0 24px var(--violet-glow)}
 
@@ -81,7 +81,6 @@
   nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
   .nav-links{display:flex;gap:32px;font-size:14px;font-weight:500;color:var(--muted)}
   .nav-links a:hover{color:var(--text)}
-  .nav-github{display:inline}
 
   /* ── Hero ── */
   .hero{min-height:100vh;display:flex;align-items:center;position:relative;overflow:hidden;padding-top:64px}
@@ -181,12 +180,12 @@
     .compat-item{font-size:13px;padding:10px 16px}
   }
 
-  /* 768px — grid collapses, spacing reduces, fonts shrink */
+  /* 768px — grid collapses, nav wraps, spacing reduces */
   @media(max-width:768px){
     .container{padding:0 20px}
     .section{padding:64px 0}
     .section-heading{font-size:28px}
-    .hero{min-height:auto;padding:120px 0 80px}
+    .hero{min-height:auto;padding:80px 0}
     .hero h1{font-size:36px}
     .hero p{font-size:15px}
     .hero-bg svg{width:300px;height:260px;transform:scale(0.6);opacity:0.4}
@@ -207,19 +206,15 @@
     footer .container{flex-direction:column;text-align:center}
     footer .links{justify-content:center}
     .footer-badge img{max-width:100%}
-  }
-
-  /* 600px — nav starts to squeeze */
-  @media(max-width:600px){
-    .nav-links{gap:16px;font-size:13px}
-    nav .container{height:56px}
+    nav .container{height:auto;min-height:56px;padding-top:10px;padding-bottom:10px;gap:8px}
+    .nav-links{gap:12px;font-size:13px}
     nav .container > div:first-child{font-size:16px!important}
   }
 
   /* 480px — small phones */
   @media(max-width:480px){
     .container{padding:0 16px}
-    .hero{min-height:auto;padding:100px 0 60px}
+    .hero{min-height:auto;padding:80px 0 60px}
     .hero h1{font-size:28px;letter-spacing:-0.02em}
     .hero p{font-size:14px;margin-bottom:20px}
     .hero-content{gap:32px}
@@ -240,15 +235,23 @@
     .compat-grid{flex-direction:column;align-items:center}
     .compat-item{width:100%;max-width:260px;justify-content:center}
     footer p,footer .links{font-size:13px}
+    .nav-links{gap:8px;font-size:12px}
+    nav .container > div:first-child{font-size:14px!important}
   }
 
   /* 380px — very small phones */
   @media(max-width:380px){
     .container{padding:0 12px}
-    nav .container{height:48px}
-    .nav-links{gap:10px;font-size:12px}
-    nav .container > div:first-child{font-size:14px!important}
-    .nav-github{display:none}
+    .nav-links{gap:6px;font-size:11px}
+    nav .container > div:first-child{font-size:12px!important}
+    nav .container{padding-top:6px;padding-bottom:6px;min-height:40px}
+  }
+
+  /* 340px — tiny phones */
+  @media(max-width:340px){
+    .nav-links{gap:4px;font-size:10px}
+    .nav-links a{letter-spacing:-0.02em}
+    nav .container > div:first-child{font-size:11px!important}
   }
 </style>
 </head>
@@ -263,7 +266,7 @@
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#demo">Demo</a>
-      <a href="https://github.com" target="_blank" class="nav-github">GitHub</a>
+      <a href="https://github.com" target="_blank">GitHub</a>
     </div>
   </div>
 </nav>
