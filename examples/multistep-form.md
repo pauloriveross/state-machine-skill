@@ -200,22 +200,18 @@ The component MUST ALWAYS:
 ```tsx
 /* state-machine: Step1(Idle|Dirty|Validating)|Step2(Idle|Dirty|Validating)|Step3(Idle|Accepting)|Submitting|Success|Error|Cancelled : CHANGE|NEXT|PREV|SUBMIT|SUBMIT_SUCCESS|SUBMIT_ERROR|RETRY|CANCEL|VALIDATE|VALIDATION_PASS|VALIDATION_FAIL|ACCEPT|UNACCEPT */
 
-import { useState, useCallback } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
+import { useMachine } from 'state-machine';
 
 // ── Types ──
 
-type StepName = 'Step1' | 'Step2' | 'Step3';
-type StepChildState = 'Idle' | 'Dirty' | 'Validating';
-type RootState =
-  | { step: 'Step1'; child: StepChildState }
-  | { step: 'Step2'; child: StepChildState }
-  | { step: 'Step3'; child: 'Idle' | 'Accepting' }
-  | { step: 'Submitting' }
-  | { step: 'Success'; response: unknown }
-  | { step: 'Error'; message: string }
-  | { step: 'Cancelled' };
+type State =
+  | 'Step1.Idle' | 'Step1.Dirty' | 'Step1.Validating'
+  | 'Step2.Idle' | 'Step2.Dirty' | 'Step2.Validating'
+  | 'Step3.Idle' | 'Step3.Accepting'
+  | 'Submitting' | 'Success' | 'Error' | 'Cancelled';
 
-type FormEvent =
+type Event =
   | { type: 'CHANGE'; field: string; value: string }
   | { type: 'NEXT' }
   | { type: 'PREV' }
@@ -237,12 +233,24 @@ interface FormData {
   confirmPassword: string;
 }
 
-interface StepData {
-  name: string;
-  email: string;
-  password: string;
-  confirmPassword: string;
+interface FormContext {
+  formData: FormData;
+  errors: Record<string, string>;
+  serverError: string | null;
+  accepted: boolean;
+  response?: unknown;
+  step1Data?: { name: string; email: string } | null;
+  step2Data?: { password: string; confirmPassword: string } | null;
 }
+
+type RootState =
+  | { step: 'Step1'; child: 'Idle' | 'Dirty' | 'Validating' }
+  | { step: 'Step2'; child: 'Idle' | 'Dirty' | 'Validating' }
+  | { step: 'Step3'; child: 'Idle' | 'Accepting' }
+  | { step: 'Submitting' }
+  | { step: 'Success'; response: unknown }
+  | { step: 'Error'; message: string; retry: () => void }
+  | { step: 'Cancelled' };
 
 // ── Guards ──
 
@@ -258,6 +266,93 @@ function isStep2Valid(data: FormData): boolean {
   return data.password.length >= 8 && data.password === data.confirmPassword;
 }
 
+// ── Config ──
+
+const config = {
+  initial: 'Step1.Idle' as State,
+  context: {
+    formData: { name: '', email: '', password: '', confirmPassword: '' },
+    errors: {},
+    serverError: null,
+    accepted: false,
+    step1Data: null,
+    step2Data: null,
+  } as FormContext,
+  states: {
+    'Step1.Idle': {
+      on: {
+        CHANGE: { target: 'Step1.Dirty', actions: ['updateField'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    'Step1.Dirty': {
+      on: {
+        CHANGE: { target: 'Step1.Dirty', actions: ['updateField'] },
+        VALIDATE: { target: 'Step1.Validating', actions: ['validateStep1'] },
+        NEXT: { target: 'Step2.Idle', guard: 'isStep1Valid', actions: ['saveStep1'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    'Step1.Validating': {
+      on: {
+        VALIDATION_PASS: { target: 'Step1.Idle' },
+        VALIDATION_FAIL: { target: 'Step1.Dirty', actions: ['setErrors'] },
+      },
+    },
+    'Step2.Idle': {
+      on: {
+        CHANGE: { target: 'Step2.Dirty', actions: ['updateField'] },
+        PREV: { target: 'Step1.Dirty', actions: ['restoreStep1'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    'Step2.Dirty': {
+      on: {
+        CHANGE: { target: 'Step2.Dirty', actions: ['updateField'] },
+        VALIDATE: { target: 'Step2.Validating', actions: ['validateStep2'] },
+        NEXT: { target: 'Step3.Idle', guard: 'isStep2Valid', actions: ['saveStep2'] },
+        PREV: { target: 'Step1.Dirty', actions: ['restoreStep1'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    'Step2.Validating': {
+      on: {
+        VALIDATION_PASS: { target: 'Step2.Idle' },
+        VALIDATION_FAIL: { target: 'Step2.Dirty', actions: ['setErrors'] },
+      },
+    },
+    'Step3.Idle': {
+      on: {
+        ACCEPT: { target: 'Step3.Accepting', actions: ['setAccepted'] },
+        PREV: { target: 'Step2.Dirty', actions: ['restoreStep2'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    'Step3.Accepting': {
+      on: {
+        UNACCEPT: { target: 'Step3.Idle', actions: ['setUnaccepted'] },
+        SUBMIT: { target: 'Submitting', guard: 'isAccepted', actions: ['submitRegistration'] },
+        PREV: { target: 'Step2.Dirty', actions: ['restoreStep2'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    Submitting: {
+      on: {
+        SUBMIT_SUCCESS: { target: 'Success', actions: ['onSuccess'] },
+        SUBMIT_ERROR: { target: 'Error', actions: ['setServerError'] },
+      },
+    },
+    Success: { on: {} },
+    Error: {
+      on: {
+        RETRY: { target: 'Submitting', actions: ['submitRegistration'] },
+        CANCEL: { target: 'Cancelled' },
+      },
+    },
+    Cancelled: { on: {} },
+  },
+};
+
 // ── Hook ──
 
 interface UseMultiStepFormOptions {
@@ -267,162 +362,101 @@ interface UseMultiStepFormOptions {
 }
 
 export function useMultiStepForm(options: UseMultiStepFormOptions = {}) {
-  const [state, setState] = useState<RootState>({ step: 'Step1', child: 'Idle' });
-  const [formData, setFormData] = useState<FormData>({
-    name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
-  const dispatch = useCallback((event: FormEvent) => {
-    setState(prev => {
-      const step = 'step' in prev ? prev.step : null;
-
-      switch (step) {
-        // ── Step 1 ──
-        case 'Step1': {
-          if (event.type === 'CANCEL') return { step: 'Cancelled' };
-          if (event.type === 'PREV') return prev; // no-op, already step 1
-
-          if (event.type === 'CHANGE') {
-            setFormData(f => ({ ...f, [event.field]: event.value }));
-            if (prev.child === 'Idle') return { step: 'Step1', child: 'Dirty' };
-            return { step: 'Step1', child: 'Dirty' };
-          }
-
-          if (event.type === 'VALIDATE') {
-            return { step: 'Step1', child: 'Validating' };
-          }
-
-          if (event.type === 'VALIDATION_PASS') {
-            return { step: 'Step1', child: 'Idle' };
-          }
-
-          if (event.type === 'VALIDATION_FAIL') {
-            setErrors(event.errors);
-            return { step: 'Step1', child: 'Dirty' };
-          }
-
-          if (event.type === 'NEXT') {
-            if (prev.child === 'Validating' || !isStep1Valid(formData)) {
-              return prev; // wait for validation
-            }
-            return { step: 'Step2', child: 'Idle' };
-          }
-
-          return prev;
+  const implementations = useMemo(() => ({
+    actions: {
+      updateField: (ctx: FormContext, event: Event) => {
+        if (event.type !== 'CHANGE') return;
+        return { formData: { ...ctx.formData, [event.field]: event.value } };
+      },
+      saveStep1: (ctx: FormContext) => ({
+        step1Data: { name: ctx.formData.name, email: ctx.formData.email },
+      }),
+      saveStep2: (ctx: FormContext) => ({
+        step2Data: { password: ctx.formData.password, confirmPassword: ctx.formData.confirmPassword },
+      }),
+      restoreStep1: (ctx: FormContext) => ({
+        formData: {
+          ...ctx.formData,
+          name: ctx.step1Data?.name ?? '',
+          email: ctx.step1Data?.email ?? '',
+        },
+      }),
+      restoreStep2: (ctx: FormContext) => ({
+        formData: {
+          ...ctx.formData,
+          password: ctx.step2Data?.password ?? '',
+          confirmPassword: ctx.step2Data?.confirmPassword ?? '',
+        },
+      }),
+      setErrors: (ctx: FormContext, event: Event) => {
+        if (event.type !== 'VALIDATION_FAIL') return;
+        return { errors: event.errors };
+      },
+      setAccepted: () => ({ accepted: true }),
+      setUnaccepted: () => ({ accepted: false }),
+      validateStep1: async (_ctx: FormContext, _event: Event, _send: (e: Event) => void) => {},
+      validateStep2: async (_ctx: FormContext, _event: Event, _send: (e: Event) => void) => {},
+      submitRegistration: async (ctx: FormContext, _event: Event, send: (e: Event) => void) => {
+        const onSubmit = optionsRef.current.onSubmit;
+        if (!onSubmit) return;
+        try {
+          const response = await onSubmit(ctx.formData);
+          send({ type: 'SUBMIT_SUCCESS', response });
+        } catch (err: any) {
+          send({ type: 'SUBMIT_ERROR', message: err?.message ?? 'Unknown error' });
         }
+      },
+      onSuccess: (ctx: FormContext, event: Event) => {
+        if (event.type !== 'SUBMIT_SUCCESS') return;
+        optionsRef.current.onSuccess?.(event.response);
+        return { response: event.response };
+      },
+      setServerError: (ctx: FormContext, event: Event) => {
+        if (event.type !== 'SUBMIT_ERROR') return;
+        return { serverError: event.message };
+      },
+    },
+    guards: {
+      isStep1Valid: (ctx: FormContext) => isStep1Valid(ctx.formData),
+      isStep2Valid: (ctx: FormContext) => isStep2Valid(ctx.formData),
+      isAccepted: (ctx: FormContext) => ctx.accepted === true,
+    },
+  }), []);
 
-        // ── Step 2 ──
-        case 'Step2': {
-          if (event.type === 'CANCEL') return { step: 'Cancelled' };
+  const { state: flatState, context, send } = useMachine<State, Event, FormContext>(config, implementations);
 
-          if (event.type === 'CHANGE') {
-            setFormData(f => ({ ...f, [event.field]: event.value }));
-            if (prev.child === 'Idle') return { step: 'Step2', child: 'Dirty' };
-            return { step: 'Step2', child: 'Dirty' };
-          }
+  const retry = useCallback(() => send({ type: 'RETRY' }), [send]);
 
-          if (event.type === 'VALIDATE') {
-            return { step: 'Step2', child: 'Validating' };
-          }
-
-          if (event.type === 'VALIDATION_PASS') {
-            return { step: 'Step2', child: 'Idle' };
-          }
-
-          if (event.type === 'VALIDATION_FAIL') {
-            setErrors(event.errors);
-            return { step: 'Step2', child: 'Dirty' };
-          }
-
-          if (event.type === 'PREV') {
-            return { step: 'Step1', child: 'Dirty' };
-          }
-
-          if (event.type === 'NEXT') {
-            if (prev.child === 'Validating' || !isStep2Valid(formData)) {
-              return prev;
-            }
-            return { step: 'Step3', child: 'Idle' };
-          }
-
-          return prev;
-        }
-
-        // ── Step 3 ──
-        case 'Step3': {
-          if (event.type === 'CANCEL') return { step: 'Cancelled' };
-          if (event.type === 'PREV') return { step: 'Step2', child: 'Dirty' };
-
-          if (event.type === 'ACCEPT') return { step: 'Step3', child: 'Accepting' };
-          if (event.type === 'UNACCEPT') return { step: 'Step3', child: 'Idle' };
-
-          if (event.type === 'SUBMIT') {
-            if (prev.child !== 'Accepting') return prev;
-            processSubmit(formData, options);
-            return { step: 'Submitting' };
-          }
-
-          return prev;
-        }
-
-        // ── Submitting ──
-        case 'Submitting': {
-          if (event.type === 'SUBMIT_SUCCESS') {
-            options.onSuccess?.(event.response);
-            return { step: 'Success', response: event.response };
-          }
-          if (event.type === 'SUBMIT_ERROR') {
-            return { step: 'Error', message: event.message };
-          }
-          return prev;
-        }
-
-        // ── Error ──
-        case 'Error': {
-          if (event.type === 'RETRY') {
-            processSubmit(formData, options);
-            return { step: 'Submitting' };
-          }
-          if (event.type === 'CANCEL') return { step: 'Cancelled' };
-          return prev;
-        }
-
-        // ── Terminal states ──
-        case 'Success':
-        case 'Cancelled':
-          return prev;
-
-        default:
-          return prev;
+  const state: RootState = useMemo(() => {
+    switch (flatState) {
+      case 'Success':
+        return { step: 'Success', response: context.response };
+      case 'Error':
+        return { step: 'Error', message: context.serverError ?? '', retry };
+      case 'Cancelled':
+        return { step: 'Cancelled' };
+      case 'Submitting':
+        return { step: 'Submitting' };
+      default: {
+        const [step, child] = flatState.split('.') as [string, string];
+        return { step, child } as RootState;
       }
-    });
-  }, [formData, options]);
+    }
+  }, [flatState, context, retry]);
 
-  const next = useCallback(() => dispatch({ type: 'NEXT' }), [dispatch]);
-  const prev = useCallback(() => dispatch({ type: 'PREV' }), [dispatch]);
-  const submit = useCallback(() => dispatch({ type: 'SUBMIT' }), [dispatch]);
-  const cancel = useCallback(() => dispatch({ type: 'CANCEL' }), [dispatch]);
-  const change = useCallback((field: string, value: string) => dispatch({ type: 'CHANGE', field, value }), [dispatch]);
+  const next = useCallback(() => send({ type: 'NEXT' }), [send]);
+  const prev = useCallback(() => send({ type: 'PREV' }), [send]);
+  const submit = useCallback(() => send({ type: 'SUBMIT' }), [send]);
+  const cancel = useCallback(() => send({ type: 'CANCEL' }), [send]);
+  const change = useCallback((field: string, value: string) => send({ type: 'CHANGE', field, value }), [send]);
 
-  return { state, formData, errors, next, prev, submit, cancel, change, dispatch };
+  return { state, formData: context.formData, errors: context.errors, next, prev, submit, cancel, change, send };
 }
 
-async function processSubmit(
-  data: FormData,
-  options: UseMultiStepFormOptions,
-): Promise<void> {
-  if (!options.onSubmit) return;
-  try {
-    const response = await options.onSubmit(data);
-    // event dispatched via parent callback
-  } catch (err) {
-    // handled by parent
-  }
-}
+// ── Component ──
 
 interface FormStepProps {
   state: RootState;
@@ -433,6 +467,7 @@ interface FormStepProps {
   onPrev: () => void;
   onSubmit: () => void;
   onCancel: () => void;
+  send: (event: Event) => void;
 }
 
 export function MultiStepForm({
@@ -444,6 +479,7 @@ export function MultiStepForm({
   onPrev,
   onSubmit,
   onCancel,
+  send,
 }: FormStepProps) {
   if (state.step === 'Success') {
     return (
@@ -563,7 +599,7 @@ export function MultiStepForm({
             <input
               type="checkbox"
               checked={state.child === 'Accepting'}
-              onChange={e => dispatch(e.target.checked ? { type: 'ACCEPT' } : { type: 'UNACCEPT' })}
+              onChange={e => send(e.target.checked ? { type: 'ACCEPT' } : { type: 'UNACCEPT' })}
             />
             I agree to the terms and conditions
           </label>
@@ -657,7 +693,7 @@ describe('MultiStepForm state machine', () => {
     act(() => result.current.next());
 
     // Accept terms
-    act(() => result.current.dispatch({ type: 'ACCEPT' }));
+    act(() => result.current.send({ type: 'ACCEPT' }));
     expect(result.current.state).toMatchObject({ step: 'Step3', child: 'Accepting' });
 
     // Submit
@@ -667,13 +703,13 @@ describe('MultiStepForm state machine', () => {
 
   it('transitions to Success on SUBMIT_SUCCESS', () => {
     const { result } = renderHook(() => useMultiStepForm());
-    act(() => result.current.dispatch({ type: 'SUBMIT_SUCCESS', response: { id: 1 } }));
+    act(() => result.current.send({ type: 'SUBMIT_SUCCESS', response: { id: 1 } }));
     expect(result.current.state).toMatchObject({ step: 'Success' });
   });
 
   it('transitions to Error on SUBMIT_ERROR', () => {
     const { result } = renderHook(() => useMultiStepForm());
-    act(() => result.current.dispatch({ type: 'SUBMIT_ERROR', message: 'Email taken' }));
+    act(() => result.current.send({ type: 'SUBMIT_ERROR', message: 'Email taken' }));
     expect(result.current.state).toMatchObject({ step: 'Error', message: 'Email taken' });
   });
 
@@ -687,10 +723,10 @@ describe('MultiStepForm state machine', () => {
     const onSubmit = vi.fn().mockResolvedValue({ id: 1 });
     const { result } = renderHook(() => useMultiStepForm({ onSubmit }));
 
-    act(() => result.current.dispatch({ type: 'SUBMIT_ERROR', message: 'Server error' }));
+    act(() => result.current.send({ type: 'SUBMIT_ERROR', message: 'Server error' }));
     expect(result.current.state).toMatchObject({ step: 'Error' });
 
-    act(() => result.current.dispatch({ type: 'RETRY' }));
+    act(() => result.current.send({ type: 'RETRY' }));
     expect(result.current.state).toMatchObject({ step: 'Submitting' });
   });
 });

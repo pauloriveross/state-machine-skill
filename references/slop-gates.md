@@ -1,4 +1,4 @@
-# Slop Gates — 35 Validation Gates
+# Slop Gates — 38 Validation Gates
 
 > Every output from this skill must pass all applicable gates before being emitted.
 > If a gate fails: stop, report which gate failed, and provide instructions to fix.
@@ -6,9 +6,9 @@
 ## How gates work
 
 ```
-model     → gates 1–10  (model integrity)
-implement → gates 1–20  (model + code integrity)
-audit     → gates 21–35 (audit integrity)
+model     → gates 1–13  (model integrity)
+implement → gates 1–23  (model + code integrity)
+audit     → gates 24–38 (audit integrity)
 ```
 
 Each gate is a yes/no question. Answer `NO` → failure. The agent MUST stop and report:
@@ -24,7 +24,7 @@ Do NOT emit any output until all gates pass.
 
 ---
 
-## Model gates (1–10)
+## Model gates (1–13)
 
 Run these on every model, whether from `model`, `implement`, or any derived workflow.
 
@@ -158,6 +158,17 @@ Transitions:
 
 **Why:** Verb-named states create confusion between states and events. `Loading` is a state (user sees a spinner). `load` is an event.
 
+**Scoring (0–1):** The validator assigns a score to each name. Names scoring ≥ 0.7 produce **warnings** (printed, non-blocking). Names scoring < 0.7 produce **errors** (blocking).
+
+| Score | Meaning | Example |
+|-------|---------|---------|
+| 1.0 | Perfect — known allowlist or clear noun/adjective | `Closed`, `Success` |
+| 0.7–0.99 | Acceptable — minor convention mismatch | PascalCase `OnClick` (mild warning) |
+| 0.3–0.6 | Marginal — name looks like boolean or verb | `isLoading`, `fetchData` |
+| < 0.3 | Fail — strongly violates naming rules | `fetching data` (spaces + verb) |
+
+**Allowlist:** Common -ing state names are pre-approved: Loading, Opening, Closing, Uploading, Downloading, Searching, Validating, Submitting, Authenticating, Refreshing, etc.
+
 **Fail names:**
 ```
 fetching       (gerund/verb)
@@ -184,6 +195,17 @@ Empty          (adjective — no data)
 **Check:** Are event names past-tense (FETCH_SUCCESS) or imperative (SUBMIT, CANCEL, RETRY)?
 
 **Why:** Events are actions that happen. Past tense for reactive events (server responded). Imperative for user-triggered events.
+
+**Scoring (0–1):** Same score system as Gate 06. ≥ 0.7 = warning, < 0.7 = error.
+
+| Score | Meaning | Example |
+|-------|---------|---------|
+| 1.0 | Perfect SCREAMING_SNAKE_CASE | `FETCH_SUCCESS`, `SUBMIT` |
+| 0.8 | PascalCase — acceptable, warning issued | `FetchSuccess`, `Submit` |
+| 0.4–0.5 | Lowercase or ambiguous | `fetchSuccess`, `data` |
+| 0.3 | Gerund — strongly discouraged | `loading`, `fetching` |
+
+**Internal events** (`<done>`, `<error>`) are skipped automatically (score: 1.0).
 
 **Fail names:**
 ```
@@ -285,11 +307,100 @@ Step2 has an outgoing transition. Done is terminal.
 
 ---
 
-## Implementation gates (11–20)
+### Gate 11 — Actions node is declared
 
-Run these on every generated implementation, in addition to gates 1–10.
+**Check:** Does the model have a top-level `actions` (or `effects`) node that declares every side effect the machine can perform?
 
-### Gate 11 — State render branches match model states
+**Why:** Side effects (API calls, callbacks, timers, animations) must be declared explicitly so the framework can bind them to state transitions. Undeclared side effects cannot be tested, traced, or guarded.
+
+**Fail examples:**
+```json
+{ "states": ["A*", "B"], "transitions": [...] }
+// No "actions" node — side effects are invisible to the framework
+```
+
+```json
+{ "actions": [null, ""] }
+// Array contains invalid entries
+```
+
+**Pass example:**
+```json
+{
+  "states": ["Closed*", "Opening", "Loading"],
+  "transitions": [...],
+  "actions": {
+    "onOpen":  { "description": "Opens the modal", "async": false },
+    "fetchData": { "description": "Fetches API data", "async": true }
+  }
+}
+```
+
+**Fix:** Add an `actions` node as either:
+- An **object map** where each key is a camelCase action name and each value is a descriptor `{ description, async }`.
+- An **array** of action name strings or `{ name, description, async }` objects.
+
+---
+
+### Gate 12 — Transition actions reference declared actions
+
+**Check:** Does every action name in the transition `Actions` column correspond to a key in the top-level `actions` node?
+
+**Why:** An action called in a transition but not declared in the `actions` node cannot be bound by the framework. The component would crash at runtime.
+
+**Fail example:**
+```json
+{
+  "transitions": [{ "From": "A", "Event": "GO", "To": "B", "Actions": "onGo" }],
+  "actions": { "onOpen": {} }
+}
+// "onGo" is not declared in "actions"
+```
+
+**Pass example:**
+```json
+{
+  "transitions": [{ "From": "A", "Event": "GO", "To": "B", "Actions": "onGo" }],
+  "actions": { "onGo": {}, "onOpen": {} }
+}
+```
+
+**Fix:** Either add the missing action to the `actions` node, or correct the transition's Actions column to use a declared action name.
+
+---
+
+### Gate 13 — State lifecycle actions reference declared actions
+
+**Check:** For state objects that declare `onEnter` or `onExit` lifecycle hooks, do the referenced action names exist in the top-level `actions` node?
+
+**Why:** Lifecycle hooks that reference undeclared actions cannot be bound by the framework, leaving the machine in an unpredictable state during entry/exit.
+
+**Fail example:**
+```json
+{
+  "states": ["A*", { "name": "B", "onEnter": "setup" }],
+  "actions": { "teardown": {} }
+}
+// "setup" is referenced by B.onEnter but not declared in "actions"
+```
+
+**Pass example:**
+```json
+{
+  "states": ["A*", { "name": "B", "onEnter": "setup", "onExit": "teardown" }],
+  "actions": { "setup": {}, "teardown": {} }
+}
+```
+
+**Fix:** Add the missing action to the `actions` node, or correct the state's `onEnter`/`onExit` to reference a declared action.
+
+---
+
+## Implementation gates (14–23)
+
+Run these on every generated implementation, in addition to gates 1–13.
+
+### Gate 14 — State render branches match model states
 
 **Check:** Does every `switch` / `if-else` render branch correspond to exactly one state in the model? Are there extra branches or missing branches?
 
@@ -318,7 +429,7 @@ switch (state) {
 
 ---
 
-### Gate 12 — No redundant boolean flags
+### Gate 15 — No redundant boolean flags
 
 **Check:** Does the implementation avoid storing boolean flags that could be derived from the current state?
 
@@ -340,7 +451,7 @@ const isLoading = state === 'Loading';  // derived
 
 ---
 
-### Gate 13 — Impossible state combinations impossible
+### Gate 16 — Impossible state combinations impossible
 
 **Check:** Is there any code path that can produce two mutually exclusive states simultaneously?
 
@@ -364,7 +475,7 @@ if (event === 'FETCH_ERROR') setState('Error');
 
 ---
 
-### Gate 14 — Each event handler dispatches exactly 1 event to the machine
+### Gate 17 — Each event handler dispatches exactly 1 event to the machine
 
 **Check:** Does each user interaction (click, keypress, network response) dispatch exactly one event to the state machine?
 
@@ -390,7 +501,7 @@ function handleClick() {
 
 ---
 
-### Gate 15 — Side effects are in actions, not transitions
+### Gate 18 — Side effects are in actions, not transitions
 
 **Check:** Is every side effect (network call, callback, analytics, DOM mutation) defined as a named action in the model and called from the transition's action list, not inline in the dispatch function?
 
@@ -420,7 +531,7 @@ function dispatch(event) {
 
 ---
 
-### Gate 16 — Async actions dispatch events on completion
+### Gate 19 — Async actions dispatch events on completion
 
 **Check:** Does every async action (network call, timer, animation) dispatch SUCCESS/ERROR events when it completes?
 
@@ -451,7 +562,7 @@ async function fetchData() {
 
 ---
 
-### Gate 17 — <done> events have timeouts or guards
+### Gate 20 — <done> events have timeouts or guards
 
 **Check:** For every <done> event (used for animations, transitions, delays), is there a timeout or guard that prevents infinite waiting?
 
@@ -475,7 +586,7 @@ Opening → <done> → Open
 
 ---
 
-### Gate 18 — Guards are pure functions
+### Gate 21 — Guards are pure functions
 
 **Check:** Is every guard a pure function (no side effects, no randomness, no network calls, no state mutations)?
 
@@ -501,7 +612,7 @@ Implementation: Math.random() > 0.5  ← non-deterministic, untestable
 
 ---
 
-### Gate 19 — Context is initialized and reset correctly
+### Gate 22 — Context is initialized and reset correctly
 
 **Check:** Does the model specify what context (data, error messages, form values) is initialized on entering each state? Is stale context cleared?
 
@@ -526,7 +637,7 @@ Entering Loading: (clearData())
 
 ---
 
-### Gate 20 — Unit test covers every transition row
+### Gate 23 — Unit test covers every transition row
 
 **Check:** Does the generated test suite have one `it()` for each row of the transition table?
 
@@ -556,11 +667,11 @@ Each test:
 
 ---
 
-## Audit gates (21–35)
+## Audit gates (24–38)
 
-Run these on every audit output, in addition to gates 1–10.
+Run these on every audit output, in addition to gates 1–13.
 
-### Gate 21 — Audit correctly reconstructed all implicit states
+### Gate 24 — Audit correctly reconstructed all implicit states
 
 **Check:** Does the reconstructed model cover all code paths in the audited component?
 
@@ -583,7 +694,7 @@ Reconstructed model: [Empty, Loading, Success, Error]
 
 ---
 
-### Gate 22 — Boolean explosion enumerated
+### Gate 25 — Boolean explosion enumerated
 
 **Check:** Did the audit enumerate all 2^n combinations of boolean flags used in the component?
 
@@ -606,7 +717,7 @@ Same as above — all 4 combinations listed, each marked valid or impossible.
 
 ---
 
-### Gate 23 — Each impossible state has a severity
+### Gate 26 — Each impossible state has a severity
 
 **Check:** Does every detected impossible state have a severity rating (🔴 High, 🟡 Medium, 🟢 Low)?
 
@@ -631,7 +742,7 @@ isLoading && isError → impossible
 
 ---
 
-### Gate 24 — Unhandled transitions identified across ALL states
+### Gate 27 — Unhandled transitions identified across ALL states
 
 **Check:** For each event the component can receive, did the audit check every state for the handler?
 
@@ -656,7 +767,7 @@ Unhandled in: Loading ← identified as 🔴 High
 
 ---
 
-### Gate 25 — Audit report sorted by severity
+### Gate 28 — Audit report sorted by severity
 
 **Check:** Is the punch list sorted with 🔴 High issues first, then 🟡 Medium, then 🟢 Low?
 
@@ -681,7 +792,7 @@ Unhandled in: Loading ← identified as 🔴 High
 
 ---
 
-### Gate 26 — Detected "Loading with data" (anti-pattern #1)
+### Gate 29 — Detected "Loading with data" (anti-pattern #1)
 
 **Check:** Did the audit detect when both a loading flag and data are simultaneously present?
 
@@ -698,7 +809,7 @@ const [data, setData] = useState(...);
 
 ---
 
-### Gate 27 — Detected "Error without message" (anti-pattern #2)
+### Gate 30 — Detected "Error without message" (anti-pattern #2)
 
 **Check:** Did the audit detect when an error flag is true but the error message is null/empty?
 
@@ -713,7 +824,7 @@ const [error, setError] = useState(null);
 
 ---
 
-### Gate 28 — Detected "Open and closing simultaneously" (anti-pattern #4)
+### Gate 31 — Detected "Open and closing simultaneously" (anti-pattern #4)
 
 **Check:** Did the audit detect overlapping boolean flags for different animation phases?
 
@@ -727,7 +838,7 @@ const [isAnimating, setIsAnimating] = useState(false);
 
 ---
 
-### Gate 29 — Detected "Authenticated without user" (anti-pattern #5)
+### Gate 32 — Detected "Authenticated without user" (anti-pattern #5)
 
 **Check:** Did the audit detect when auth state and user object are stored independently?
 
@@ -741,7 +852,7 @@ const [user, setUser] = useState(null);
 
 ---
 
-### Gate 30 — Detected "Multiple overlays" (anti-pattern #11)
+### Gate 33 — Detected "Multiple overlays" (anti-pattern #11)
 
 **Check:** Did the audit detect independent boolean flags for modal, drawer, popover, etc.?
 
@@ -755,7 +866,7 @@ const [showDrawer, setShowDrawer] = useState(false);
 
 ---
 
-### Gate 31 — Detected "Submit while invalid" (anti-pattern #8)
+### Gate 34 — Detected "Submit while invalid" (anti-pattern #8)
 
 **Check:** Did the audit detect form submission logic that depends on a guard outside the transition?
 
@@ -772,7 +883,7 @@ function handleSubmit(e) {
 
 ---
 
-### Gate 32 — Detected "Page > total pages" (anti-pattern #17)
+### Gate 35 — Detected "Page > total pages" (anti-pattern #17)
 
 **Check:** Did the audit detect unbounded pagination integers?
 
@@ -786,7 +897,7 @@ const [currentPage, setCurrentPage] = useState(1);
 
 ---
 
-### Gate 33 — Detected "Dirty but untouched" (anti-pattern #18)
+### Gate 36 — Detected "Dirty but untouched" (anti-pattern #18)
 
 **Check:** Did the audit detect dirty flag that can be true without any field being touched?
 
@@ -801,7 +912,7 @@ const [touched, setTouched] = useState({});
 
 ---
 
-### Gate 34 — Detected "Checked and disabled" (anti-pattern #20)
+### Gate 37 — Detected "Checked and disabled" (anti-pattern #20)
 
 **Check:** Did the audit detect a checkbox or toggle that is both checked and disabled?
 
@@ -814,7 +925,7 @@ const [touched, setTouched] = useState({});
 
 ---
 
-### Gate 35 — Detected "Progress 100% but not complete" (anti-pattern #27)
+### Gate 38 — Detected "Progress 100% but not complete" (anti-pattern #27)
 
 **Check:** Did the audit detect progress/percentage stored independently from a completion state?
 
@@ -857,6 +968,27 @@ When all applicable gates pass:
 ✅ All gates passed.
 <emit output>
 ```
+
+### Warnings (non-blocking)
+
+Gates 06 and 07 use a **score/tolerance** system. Names that partially match the convention (score ≥ 0.7) produce **warnings** instead of errors. Warnings are printed to stdout and do not block the process:
+
+```
+⚠️  [Gate 06 / OnClick] "OnClick" looks like an event handler (on*) pattern.
+    State names should be nouns or adjectives describing what the user sees.
+```
+
+Warnings are informational. The user may choose to address them or ignore them.
+
+### External semantic validation
+
+An optional **external validator hook** can be registered in `scripts/linguistic-analyzer.js` via `setExternalValidator(fn)`. When configured and a name scores in the marginal range (0.5–0.99), the external validator (NLP function or LLM call) can confirm the name's validity and raise its score. If the external tool approves, the gate passes with an **attenuated approval flag**:
+
+```
+✓ External validator confirmed "OnClick" as a valid state name (score: 0.85)
+```
+
+This is purely opt-in. The default behavior uses only the built-in regex patterns.
 
 ---
 

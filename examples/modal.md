@@ -135,7 +135,7 @@ The component MUST ALWAYS:
 ```tsx
 /* state-machine: Closed|Opening|Loading|Success|Error|Closing : TRIGGER|<done>|FETCH_SUCCESS|FETCH_ERROR|CLOSE|RETRY */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 type ModalState = 'Closed' | 'Opening' | 'Loading' | 'Success' | 'Error' | 'Closing';
 type ModalEvent = 'TRIGGER' | '<done>' | 'FETCH_SUCCESS' | 'FETCH_ERROR' | 'CLOSE' | 'RETRY';
@@ -150,8 +150,6 @@ interface UseModalOptions {
   onOpen?: () => void;
   onClose?: () => void;
 }
-
-const ANIMATION_DURATION_MS = 200;
 
 function useModal(options: UseModalOptions = {}) {
   const [state, setState] = useState<ModalState>('Closed');
@@ -221,13 +219,7 @@ function useModal(options: UseModalOptions = {}) {
   const trigger = useCallback(() => dispatch('TRIGGER'), [dispatch]);
   const close = useCallback(() => dispatch('CLOSE'), [dispatch]);
   const retry = useCallback(() => dispatch('RETRY'), [dispatch]);
-
-  useEffect(() => {
-    if (state === 'Opening' || state === 'Closing') {
-      const id = setTimeout(() => dispatch('<done>'), ANIMATION_DURATION_MS);
-      return () => clearTimeout(id);
-    }
-  }, [state, dispatch]);
+  const handleAnimationEnd = useCallback(() => dispatch('<done>'), [dispatch]);
 
   return { state, data, trigger, close, retry, dispatch };
 }
@@ -244,7 +236,7 @@ export function Modal({ fetchData, onOpen, onClose, renderContent }: ModalProps)
   return (
     <div className="modal-backdrop" onClick={close}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
-        {state === 'Opening' && <div className="modal-animating" />}
+        {state === 'Opening' && <div className="modal-animating" onAnimationEnd={handleAnimationEnd} />}
 
         {state === 'Loading' && (
           <div className="modal-loading">
@@ -270,7 +262,7 @@ export function Modal({ fetchData, onOpen, onClose, renderContent }: ModalProps)
           </div>
         )}
 
-        {state === 'Closing' && <div className="modal-animating" />}
+        {state === 'Closing' && <div className="modal-animating" onAnimationEnd={handleAnimationEnd} />}
       </div>
     </div>
   );
@@ -282,15 +274,11 @@ export function Modal({ fetchData, onOpen, onClose, renderContent }: ModalProps)
 ## Generated tests (Vitest)
 
 ```tsx
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useModal } from './Modal';
 
 describe('Modal state machine', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
   it('starts in Closed', () => {
     const { result } = renderHook(() => useModal());
     expect(result.current.state).toBe('Closed');
@@ -313,7 +301,7 @@ describe('Modal state machine', () => {
     const { result } = renderHook(() => useModal({ fetchData: () => Promise.resolve('data') }));
     act(() => result.current.dispatch('TRIGGER'));
     act(() => result.current.dispatch('<done>'));
-    act(() => vi.runAllTimers());
+    act(() => result.current.dispatch('FETCH_SUCCESS', 'data'));
     expect(result.current.state).toBe('Success');
   });
 
@@ -467,3 +455,4 @@ Key differences from the vanilla React version:
 - Context mutations use `assign` instead of manual setState
 - Events are typed in the `types.events` config
 - The machine is a plain object, not a hook — usable in any framework via `@xstate/react`, `@xstate/vue`, etc.
+- In the vanilla React version, `<done>` is dispatched by the real DOM `onAnimationEnd` event rather than a fixed timer

@@ -214,16 +214,16 @@ The component MUST ALWAYS:
 ```tsx
 /* state-machine: Unauthenticated(Idle|Authenticating|MfaRequired)|Authenticated(Active|Refreshing) : LOGIN|LOGIN_SUCCESS|LOGIN_MFA_REQUIRED|LOGIN_ERROR|MFA_SUBMIT|MFA_SUCCESS|MFA_ERROR|MFA_CANCEL|LOGOUT|SESSION_EXPIRED|REFRESH_TOKEN|REFRESH_SUCCESS|REFRESH_FAIL */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 
 // ── Types ──
 
-type UnauthenticatedChild = 'Idle' | 'Authenticating' | 'MfaRequired';
-type AuthenticatedChild = 'Active' | 'Refreshing';
-
 type AuthState =
-  | { region: 'Unauthenticated'; child: UnauthenticatedChild }
-  | { region: 'Authenticated'; child: AuthenticatedChild };
+  | 'Unauthenticated.Idle'
+  | 'Unauthenticated.Authenticating'
+  | 'Unauthenticated.MfaRequired'
+  | 'Authenticated.Active'
+  | 'Authenticated.Refreshing';
 
 type AuthEvent =
   | { type: 'LOGIN' }
@@ -264,8 +264,6 @@ interface AuthContext {
   tokenExpiresAt: number | null;
 }
 
-// ── Guards ──
-
 function hasCredentials(ctx: AuthContext): boolean {
   return ctx.email.length > 0 && ctx.password.length > 0;
 }
@@ -276,10 +274,78 @@ function hasMfaCode(ctx: AuthContext): boolean {
 
 function isSessionStale(ctx: AuthContext): boolean {
   if (!ctx.tokenExpiresAt) return false;
-  return ctx.tokenExpiresAt - Date.now() < 300_000; // 5 minutes
+  return ctx.tokenExpiresAt - Date.now() < 300_000;
 }
 
-// ── Hook ──
+// ── useMachine hook ──
+
+interface MachineConfig<State, Event, Context> {
+  initial: State;
+  context: Context;
+  states: Record<string, {
+    on: Record<string, {
+      target?: string;
+      guard?: string;
+      actions?: string[];
+    }>;
+  }>;
+}
+
+interface MachineImplementations<Context, Event> {
+  actions?: Record<string, (ctx: Context, event: Event, send: (event: Event) => void) => Partial<Context> | Promise<void>>;
+  guards?: Record<string, (ctx: Context, event: Event) => boolean>;
+}
+
+function useMachine<State extends string, Event extends { type: string }, Context>(
+  config: MachineConfig<State, Context>,
+  implementations?: MachineImplementations<Context, Event>,
+) {
+  const [state, setState] = useState<State>(config.initial);
+  const [context, setContext] = useState<Context>(config.context);
+  const stateRef = useRef(state);
+  const contextRef = useRef(context);
+  stateRef.current = state;
+  contextRef.current = context;
+
+  const send = useCallback((event: Event) => {
+    const s = stateRef.current;
+    const c = contextRef.current;
+    const transition = config.states[s]?.on?.[event.type];
+    if (!transition) return;
+
+    if (transition.guard) {
+      const guardFn = implementations?.guards?.[transition.guard];
+      if (guardFn && !guardFn(c, event)) return;
+    }
+
+    if (transition.target) {
+      setState(transition.target as State);
+      stateRef.current = transition.target as State;
+    }
+
+    if (transition.actions) {
+      let merged = c;
+      for (const name of transition.actions) {
+        const fn = implementations?.actions?.[name];
+        if (fn) {
+          const result = fn(merged, event, send);
+          if (result instanceof Promise) continue;
+          if (result) merged = { ...merged, ...result };
+        }
+      }
+      if (merged !== c) {
+        contextRef.current = merged;
+        setContext(merged);
+      }
+    }
+  }, [config, implementations]);
+
+  const matches = useCallback((...states: State[]) => states.includes(stateRef.current), []);
+
+  return { state, context, send, matches };
+}
+
+// ── Config ──
 
 interface UseAuthOptions {
   onLogin?: (email: string, password: string) => Promise<{ session?: Session; mfaRequired?: MfaChallenge; error?: string }>;
@@ -288,11 +354,9 @@ interface UseAuthOptions {
   onLogout?: () => void;
 }
 
-const REFRESH_INTERVAL_MS = 60_000; // check every minute
-
-export function useAuthFlow(options: UseAuthOptions = {}) {
-  const [state, setState] = useState<AuthState>({ region: 'Unauthenticated', child: 'Idle' });
-  const [ctx, setCtx] = useState<AuthContext>({
+const config = {
+  initial: 'Unauthenticated.Idle' as AuthState,
+  context: {
     email: '',
     password: '',
     mfaCode: '',
@@ -301,180 +365,139 @@ export function useAuthFlow(options: UseAuthOptions = {}) {
     session: null,
     mfaChallenge: null,
     tokenExpiresAt: null,
-  });
+  } as AuthContext,
+  states: {
+    'Unauthenticated.Idle': {
+      on: {
+        CHANGE: { actions: ['updateField'] },
+        LOGIN: { target: 'Unauthenticated.Authenticating', guard: 'hasCredentials', actions: ['postLogin'] },
+      },
+    },
+    'Unauthenticated.Authenticating': {
+      on: {
+        LOGIN_SUCCESS: { target: 'Authenticated.Active', actions: ['setSession', 'scheduleRefresh'] },
+        LOGIN_MFA_REQUIRED: { target: 'Unauthenticated.MfaRequired', actions: ['setMfaChallenge'] },
+        LOGIN_ERROR: { target: 'Unauthenticated.Idle', actions: ['setError'] },
+      },
+    },
+    'Unauthenticated.MfaRequired': {
+      on: {
+        MFA_SUBMIT: { target: 'Unauthenticated.Authenticating', guard: 'hasMfaCode', actions: ['postMfa'] },
+        MFA_CANCEL: { target: 'Unauthenticated.Idle', actions: ['cancelMfa'] },
+      },
+    },
+    'Authenticated.Active': {
+      on: {
+        REFRESH_TOKEN: { target: 'Authenticated.Refreshing', guard: 'isSessionStale', actions: ['doRefresh'] },
+        LOGOUT: { target: 'Unauthenticated.Idle', actions: ['clearSession'] },
+        SESSION_EXPIRED: { target: 'Unauthenticated.Idle', actions: ['clearSession', 'setExpiredMessage'] },
+      },
+    },
+    'Authenticated.Refreshing': {
+      on: {
+        REFRESH_SUCCESS: { target: 'Authenticated.Active', actions: ['setToken', 'scheduleRefresh'] },
+        REFRESH_FAIL: { target: 'Unauthenticated.Idle', actions: ['clearSession', 'setExpiredMessage'] },
+        LOGOUT: { target: 'Unauthenticated.Idle', actions: ['clearSession'] },
+        SESSION_EXPIRED: { target: 'Unauthenticated.Idle', actions: ['clearSession', 'setExpiredMessage'] },
+      },
+    },
+  },
+};
 
-  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+export function useAuthFlow(options: UseAuthOptions = {}) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
-  const dispatch = useCallback((event: AuthEvent) => {
-    setState(prev => {
-      const region = prev.region;
-
-      // ── Events handled at root level ──
-
-      if (event.type === 'SESSION_EXPIRED') {
-        clearSessionData();
-        return { region: 'Unauthenticated', child: 'Idle' };
-      }
-
-      if (region === 'Authenticated' && event.type === 'LOGOUT') {
-        clearSessionData();
-        if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-        return { region: 'Unauthenticated', child: 'Idle' };
-      }
-
-      // ── Unauthenticated region ──
-
-      if (region === 'Unauthenticated') {
-        switch (prev.child) {
-          case 'Idle':
-            if (event.type === 'CHANGE') {
-              setCtx(c => ({ ...c, [event.field]: event.value }));
-              return prev;
-            }
-            if (event.type === 'LOGIN' && hasCredentials(ctx)) {
-              setCtx(c => ({ ...c, error: null, message: null }));
-              processLogin(ctx.email, ctx.password, options);
-              return { region: 'Unauthenticated', child: 'Authenticating' };
-            }
-            return prev;
-
-          case 'Authenticating':
-            if (event.type === 'LOGIN_SUCCESS') {
-              setCtx(c => ({ ...c, session: event.session, tokenExpiresAt: event.session.expiresAt, error: null }));
-              startRefreshTimer();
-              return { region: 'Authenticated', child: 'Active' };
-            }
-            if (event.type === 'LOGIN_MFA_REQUIRED') {
-              setCtx(c => ({ ...c, mfaChallenge: event.challenge }));
-              return { region: 'Unauthenticated', child: 'MfaRequired' };
-            }
-            if (event.type === 'LOGIN_ERROR') {
-              setCtx(c => ({ ...c, error: event.message }));
-              return { region: 'Unauthenticated', child: 'Idle' };
-            }
-            return prev;
-
-          case 'MfaRequired':
-            if (event.type === 'MFA_SUBMIT' && hasMfaCode(ctx)) {
-              setCtx(c => ({ ...c, error: null }));
-              processMfa(ctx.mfaCode, options);
-              return { region: 'Unauthenticated', child: 'Authenticating' };
-            }
-            if (event.type === 'MFA_CANCEL') {
-              setCtx(c => ({ ...c, mfaCode: '', mfaChallenge: null }));
-              return { region: 'Unauthenticated', child: 'Idle' };
-            }
-            if (event.type === 'MFA_ERROR') {
-              setCtx(c => ({ ...c, error: event.message }));
-              return { region: 'Unauthenticated', child: 'MfaRequired' };
-            }
-            return prev;
-
-          default:
-            return prev;
+  const implementations = useMemo(() => ({
+    actions: {
+      updateField: (ctx: AuthContext, event: AuthEvent) => {
+        if (event.type !== 'CHANGE') return;
+        return { [event.field]: event.value } as Partial<AuthContext>;
+      },
+      postLogin: async (ctx: AuthContext, _event: AuthEvent, send: (e: AuthEvent) => void) => {
+        const opts = optionsRef.current;
+        if (!opts.onLogin) return;
+        try {
+          const result = await opts.onLogin(ctx.email, ctx.password);
+          if (result.session) send({ type: 'LOGIN_SUCCESS', session: result.session });
+          else if (result.mfaRequired) send({ type: 'LOGIN_MFA_REQUIRED', challenge: result.mfaRequired });
+          else if (result.error) send({ type: 'LOGIN_ERROR', message: result.error });
+        } catch (err) {
+          send({ type: 'LOGIN_ERROR', message: (err as Error).message });
         }
-      }
-
-      // ── Authenticated region ──
-
-      if (region === 'Authenticated') {
-        switch (prev.child) {
-          case 'Active':
-            if (event.type === 'REFRESH_TOKEN' && isSessionStale(ctx)) {
-              processRefresh(options);
-              return { region: 'Authenticated', child: 'Refreshing' };
-            }
-            return prev;
-
-          case 'Refreshing':
-            if (event.type === 'REFRESH_SUCCESS') {
-              setCtx(c => ({ ...c, tokenExpiresAt: Date.now() + 3600_000 }));
-              return { region: 'Authenticated', child: 'Active' };
-            }
-            if (event.type === 'REFRESH_FAIL') {
-              clearSessionData();
-              if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-              return { region: 'Unauthenticated', child: 'Idle' };
-            }
-            return prev;
-
-          default:
-            return prev;
+      },
+      postMfa: async (ctx: AuthContext, _event: AuthEvent, send: (e: AuthEvent) => void) => {
+        const opts = optionsRef.current;
+        if (!opts.onVerifyMfa) return;
+        try {
+          const result = await opts.onVerifyMfa(ctx.mfaCode);
+          if (result.session) send({ type: 'LOGIN_SUCCESS', session: result.session });
+          else if (result.error) send({ type: 'MFA_ERROR', message: result.error });
+        } catch (err) {
+          send({ type: 'MFA_ERROR', message: (err as Error).message });
         }
-      }
+      },
+      doRefresh: async (ctx: AuthContext, _event: AuthEvent, send: (e: AuthEvent) => void) => {
+        const opts = optionsRef.current;
+        if (!opts.onRefresh) return;
+        try {
+          const result = await opts.onRefresh();
+          if (result.token) send({ type: 'REFRESH_SUCCESS', token: result.token });
+          else send({ type: 'REFRESH_FAIL' });
+        } catch {
+          send({ type: 'REFRESH_FAIL' });
+        }
+      },
+      setSession: (ctx: AuthContext, event: AuthEvent) => {
+        if (event.type !== 'LOGIN_SUCCESS') return;
+        return { session: event.session, tokenExpiresAt: event.session.expiresAt, error: null, message: null };
+      },
+      setMfaChallenge: (_ctx: AuthContext, event: AuthEvent) => {
+        if (event.type !== 'LOGIN_MFA_REQUIRED') return;
+        return { mfaChallenge: event.challenge, error: null };
+      },
+      setError: (_ctx: AuthContext, event: AuthEvent) => {
+        if (event.type !== 'LOGIN_ERROR' && event.type !== 'MFA_ERROR') return;
+        return { error: event.message };
+      },
+      cancelMfa: () => ({ mfaCode: '', mfaChallenge: null } as Partial<AuthContext>),
+      clearSession: () => ({
+        session: null, tokenExpiresAt: null, email: '', password: '', mfaCode: '',
+        error: null, message: null, mfaChallenge: null,
+      } as Partial<AuthContext>),
+      setExpiredMessage: () => ({ message: 'session_expired' } as Partial<AuthContext>),
+      setToken: (ctx: AuthContext, event: AuthEvent) => {
+        if (event.type !== 'REFRESH_SUCCESS') return;
+        return { tokenExpiresAt: Date.now() + 3600_000, error: null };
+      },
+      scheduleRefresh: async (ctx: AuthContext, _event: AuthEvent, send: (e: AuthEvent) => void) => {
+        const expiresAt = ctx.tokenExpiresAt ?? Date.now() + 3600_000;
+        const delay = Math.max(1000, expiresAt - Date.now() - 300_000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        send({ type: 'REFRESH_TOKEN' });
+      },
+    },
+    guards: {
+      hasCredentials,
+      hasMfaCode,
+      isSessionStale,
+    },
+  }), []);
 
-      return prev;
-    });
-  }, [ctx, options]);
+  const { state: flatState, context, send } = useMachine<AuthState, AuthEvent, AuthContext>(config, implementations);
 
-  // ── Side effects ──
+  const state = {
+    region: flatState.startsWith('Authenticated') ? 'Authenticated' as const : 'Unauthenticated' as const,
+    child: flatState.split('.')[1] as 'Idle' | 'Authenticating' | 'MfaRequired' | 'Active' | 'Refreshing',
+  };
 
-  useEffect(() => {
-    if (state.region === 'Authenticated' && state.child === 'Active') {
-      refreshTimerRef.current = setInterval(() => {
-        dispatch({ type: 'REFRESH_TOKEN' });
-      }, REFRESH_INTERVAL_MS);
-    }
-    return () => {
-      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-    };
-  }, [state.region, state.child, dispatch]);
+  const login = useCallback(() => send({ type: 'LOGIN' }), [send]);
+  const logout = useCallback(() => send({ type: 'LOGOUT' }), [send]);
+  const submitMfa = useCallback((code: string) => send({ type: 'MFA_SUBMIT', code }), [send]);
+  const cancelMfa = useCallback(() => send({ type: 'MFA_CANCEL' }), [send]);
+  const change = useCallback((field: string, value: string) => send({ type: 'CHANGE', field, value }), [send]);
 
-  const login = useCallback(() => dispatch({ type: 'LOGIN' }), [dispatch]);
-  const logout = useCallback(() => dispatch({ type: 'LOGOUT' }), [dispatch]);
-  const submitMfa = useCallback((code: string) => dispatch({ type: 'MFA_SUBMIT', code }), [dispatch]);
-  const cancelMfa = useCallback(() => dispatch({ type: 'MFA_CANCEL' }), [dispatch]);
-  const change = useCallback((field: string, value: string) => dispatch({ type: 'CHANGE', field, value }), [dispatch]);
-
-  return { state, ctx, login, logout, submitMfa, cancelMfa, change };
-}
-
-// ── Async action helpers ──
-
-async function processLogin(email: string, password: string, options: UseAuthOptions) {
-  if (!options.onLogin) return;
-  try {
-    const result = await options.onLogin(email, password);
-    if (result.session) {
-      // Dispatched via setState callback
-    } else if (result.mfaRequired) {
-      // Dispatched via setState callback
-    } else if (result.error) {
-      // Dispatched via setState callback
-    }
-  } catch (err) {
-    // Dispatched via setState callback
-  }
-}
-
-async function processMfa(code: string, options: UseAuthOptions) {
-  if (!options.onVerifyMfa) return;
-  try {
-    const result = await options.onVerifyMfa(code);
-    // Results handled by parent
-  } catch (err) {
-    // Handled by parent
-  }
-}
-
-async function processRefresh(options: UseAuthOptions) {
-  if (!options.onRefresh) return;
-  try {
-    const result = await options.onRefresh();
-    // Results handled by parent
-  } catch (err) {
-    // Handled by parent
-  }
-}
-
-function clearSessionData() {
-  // Clears session, token, user data from storage
-  sessionStorage.removeItem('auth_token');
-  sessionStorage.removeItem('auth_user');
-}
-
-function startRefreshTimer() {
-  // Timer is managed by the useEffect hook
+  return { state, ctx: context, send, login, logout, submitMfa, cancelMfa, change };
 }
 
 // ── UI Component ──
@@ -640,7 +663,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: mockSession }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: mockSession }));
     expect(result.current.state).toMatchObject({
       region: 'Authenticated',
       child: 'Active',
@@ -652,7 +675,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({
+    act(() => result.current.send({
       type: 'LOGIN_MFA_REQUIRED',
       challenge: { method: 'totp' },
     }));
@@ -667,7 +690,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'wrong'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_ERROR', message: 'Invalid credentials' }));
+    act(() => result.current.send({ type: 'LOGIN_ERROR', message: 'Invalid credentials' }));
     expect(result.current.state).toMatchObject({
       region: 'Unauthenticated',
       child: 'Idle',
@@ -680,7 +703,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({
+    act(() => result.current.send({
       type: 'LOGIN_MFA_REQUIRED',
       challenge: { method: 'totp' },
     }));
@@ -697,7 +720,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({
+    act(() => result.current.send({
       type: 'LOGIN_MFA_REQUIRED',
       challenge: { method: 'totp' },
     }));
@@ -713,7 +736,7 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: mockSession }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: mockSession }));
     act(() => result.current.logout());
     expect(result.current.state).toMatchObject({
       region: 'Unauthenticated',
@@ -726,8 +749,8 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: mockSession }));
-    act(() => result.current.dispatch({ type: 'SESSION_EXPIRED' }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: mockSession }));
+    act(() => result.current.send({ type: 'SESSION_EXPIRED' }));
     expect(result.current.state).toMatchObject({
       region: 'Unauthenticated',
       child: 'Idle',
@@ -744,8 +767,8 @@ describe('AuthFlow state machine', () => {
       ...mockSession,
       expiresAt: Date.now() + 60_000, // 1 minute
     };
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: staleSession }));
-    act(() => result.current.dispatch({ type: 'REFRESH_TOKEN' }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: staleSession }));
+    act(() => result.current.send({ type: 'REFRESH_TOKEN' }));
     expect(result.current.state).toMatchObject({
       region: 'Authenticated',
       child: 'Refreshing',
@@ -757,9 +780,9 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: mockSession }));
-    act(() => result.current.dispatch({ type: 'REFRESH_TOKEN' }));
-    act(() => result.current.dispatch({ type: 'REFRESH_SUCCESS', token: 'newToken456' }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: mockSession }));
+    act(() => result.current.send({ type: 'REFRESH_TOKEN' }));
+    act(() => result.current.send({ type: 'REFRESH_SUCCESS', token: 'newToken456' }));
     expect(result.current.state).toMatchObject({
       region: 'Authenticated',
       child: 'Active',
@@ -771,9 +794,9 @@ describe('AuthFlow state machine', () => {
     act(() => result.current.change('email', 'alice@example.com'));
     act(() => result.current.change('password', 'password123'));
     act(() => result.current.login());
-    act(() => result.current.dispatch({ type: 'LOGIN_SUCCESS', session: mockSession }));
-    act(() => result.current.dispatch({ type: 'REFRESH_TOKEN' }));
-    act(() => result.current.dispatch({ type: 'REFRESH_FAIL' }));
+    act(() => result.current.send({ type: 'LOGIN_SUCCESS', session: mockSession }));
+    act(() => result.current.send({ type: 'REFRESH_TOKEN' }));
+    act(() => result.current.send({ type: 'REFRESH_FAIL' }));
     expect(result.current.state).toMatchObject({
       region: 'Unauthenticated',
       child: 'Idle',

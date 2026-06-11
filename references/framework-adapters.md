@@ -6,127 +6,98 @@
 
 ## Generic adapter pattern
 
-Every framework adapter follows the same pattern:
-
-1. **State** is a single union type
-2. **Dispatch** is a function that takes the current state, an event, and returns the next state
-3. **Render** is a function of the current state
+Every adapter follows the **config + implementations** pattern:
 
 ```
-model (states, events, guards, actions)
-  → dispatch(currentState, event) → nextState
-  → render(nextState) → UI
+config (states, transitions, guard names, action names)
+  + implementations (actual guard/action functions)
+  → adapter(config, implementations)
+  → { state, context, send, matches, done }
 ```
 
----
+Key design rules:
+1. **Config** is fully declarative — states, transitions, guard names (strings), action names (strings)
+2. **Implementations** provides the actual functions for guards and actions
+3. Actions can be sync (return `Partial<Context>` to merge) or async (return `Promise<void>` and call `send()` when done)
+4. Async actions acquire a "pending lock" that blocks external `send` calls until the async action resolves
+5. Internal `send` calls (from inside actions) bypass the pending lock
+6. The pattern encapsulates async execution — the consumer never manually dispatches events for async results
 
-## React — useReducer
+### Model JSON schema (validator format)
 
-The `useReducer` hook is the idiomatic React adapter. The reducer IS the transition table.
+The canonical model JSON validated by `scripts/validate-model.js` uses this structure:
 
-### Pattern
-
-```tsx
-import { useReducer, useCallback } from 'react';
-
-// ── Types matching the model ──
-type State = 'Closed' | 'Opening' | 'Loading' | 'Success' | 'Error' | 'Closing';
-type Event =
-  | { type: 'TRIGGER' }
-  | { type: '<done>' }
-  | { type: 'FETCH_SUCCESS'; data: unknown }
-  | { type: 'FETCH_ERROR'; message: string }
-  | { type: 'CLOSE' };
-
-interface Context {
-  data: unknown;
-  error: string | null;
-}
-
-// ── Guards (pure functions, defined outside reducer) ──
-function canDismiss(state: State): boolean {
-  return state !== 'Loading'; // can't dismiss while loading
-}
-
-// ── Reducer = transition table ──
-function reducer(state: State, event: Event): State {
-  switch (state) {
-    case 'Closed':
-      if (event.type === 'TRIGGER') return 'Opening';
-      return state;
-
-    case 'Opening':
-      if (event.type === '<done>') return 'Loading';
-      if (event.type === 'CLOSE') return 'Closing';
-      return state;
-
-    case 'Loading':
-      if (event.type === 'FETCH_SUCCESS') return 'Success';
-      if (event.type === 'FETCH_ERROR') return 'Error';
-      return state;
-
-    case 'Success':
-      if (event.type === 'CLOSE') return 'Closing';
-      return state;
-
-    case 'Error':
-      if (event.type === 'CLOSE') return 'Closing';
-      if (event.type === 'RETRY') return 'Loading';
-      return state;
-
-    case 'Closing':
-      if (event.type === '<done>') return 'Closed';
-      return state;
-
-    default:
-      return state;
+```json
+{
+  "states": [
+    "Closed*",
+    { "name": "Opening", "onEnter": "onOpen" },
+    "Loading",
+    "Success"
+  ],
+  "transitions": [
+    { "From": "Closed", "Event": "TRIGGER", "To": "Opening", "Actions": "onOpen" },
+    { "From": "Opening", "Event": "<done>", "To": "Loading", "Actions": "fetchData" }
+  ],
+  "actions": {
+    "onOpen":     { "description": "Opens the modal", "async": false },
+    "fetchData":  { "description": "Fetches API data", "async": true }
   }
 }
-
-// ── Hook ──
-function useModal() {
-  const [state, dispatch] = useReducer(reducer, 'Closed');
-  const contextRef = useRef<Context>({ data: null, error: null });
-
-  const trigger = useCallback(() => dispatch({ type: 'TRIGGER' }), []);
-  const close = useCallback(() => {
-    if (canDismiss(state)) dispatch({ type: 'CLOSE' });
-  }, [state]);
-  const retry = useCallback(() => dispatch({ type: 'RETRY' }), []);
-
-  return { state, context: contextRef.current, trigger, close, retry };
-}
 ```
 
-### Key points
+- **`states`**: Array of strings or `{ name, onEnter?, onExit?, type? }` objects. Mark initial with `*` suffix or `type: "initial"`.
+- **`transitions`**: Array of `{ From, Event, Guard?, To, Actions? }` rows. The `Actions` column references declared action names (space/comma-separated).
+- **`actions`** (optional but recommended): Object map of action names to descriptors, or array of action name strings. Every action referenced in transitions or state lifecycle hooks must appear here.
 
-- The reducer IS the transition table — every `case` is a state, every `if` is an event handler
-- `useReducer` guarantees that dispatch is stable and state transitions are deterministic
-- Guards are called BEFORE dispatching (or inside the reducer before returning)
-- Side effects live in `useEffect` or are triggered by the dispatch caller
+### Programmatic Types
 
-### When to use useReducer vs useState
+```tsx
+type MachineConfig<State, Event, Context> = {
+  initial: State;
+  context: Context;
+  states: Record<State, {
+    type?: 'final';
+    on?: Record<string, {
+      target?: State;
+      guard?: string;
+      actions?: string[];
+    }>;
+  }>;
+};
 
-| Scenario | Use |
-|----------|-----|
-| 2–5 states, simple transitions | `useReducer` |
-| 6+ states, complex guards | `useReducer` |
-| Need to test transitions in isolation | `useReducer` (export the reducer) |
-| Single boolean toggle | `useState` (trivial) |
+type MachineImplementations<Context, Event> = {
+  actions?: Record<string, (
+    ctx: Context,
+    event: Event,
+    send: (event: Event) => void
+  ) => Partial<Context> | void | Promise<void>>;
+  guards?: Record<string, (ctx: Context, event: Event) => boolean>;
+};
+```
 
----
+### Send internals
 
-## Vue — reactive
+```
+send(event, fromAction = false):
+  if pendingRef.current && !fromAction → return
 
-Vue 3's Composition API with `reactive` and `computed` provides the state machine foundation.
+  lookup handler in current state for event.type
+  if handler.guard → evaluate guard function
+  if guard fails → return
 
-### Pattern
+  for each action in handler.actions:
+    result = action(ctx, event, send(fromAction=true))
+    if result is Promise → push to async queue
+    else if result is object → merge into context
 
-```vue
-<script setup lang="ts">
-import { reactive, computed } from 'vue';
+  if async queue has items → set pendingRef.current = true
+  transition to handler.target state
+```
 
-// ── Types ──
+### Modal example (shared across all adapters)
+
+```tsx
 type State = 'Closed' | 'Opening' | 'Loading' | 'Success' | 'Error' | 'Closing';
 type Event =
   | { type: 'TRIGGER' }
@@ -136,79 +107,280 @@ type Event =
   | { type: 'CLOSE' }
   | { type: 'RETRY' };
 
-// ── Machine ──
-const machine = reactive({
-  state: 'Closed' as State,
-  data: null as unknown,
-  error: null as string | null,
-});
-
-function dispatch(event: Event) {
-  switch (machine.state) {
-    case 'Closed':
-      if (event.type === 'TRIGGER') { machine.state = 'Opening'; }
-      break;
-    case 'Opening':
-      if (event.type === '<done>') { machine.state = 'Loading'; fetchContent(); }
-      if (event.type === 'CLOSE') { machine.state = 'Closing'; }
-      break;
-    case 'Loading':
-      if (event.type === 'FETCH_SUCCESS') {
-        machine.data = event.data;
-        machine.error = null;
-        machine.state = 'Success';
-      }
-      if (event.type === 'FETCH_ERROR') {
-        machine.error = event.message;
-        machine.state = 'Error';
-      }
-      break;
-    case 'Success':
-      if (event.type === 'CLOSE') { machine.state = 'Closing'; }
-      break;
-    case 'Error':
-      if (event.type === 'CLOSE') { machine.state = 'Closing'; }
-      if (event.type === 'RETRY') { machine.state = 'Loading'; fetchContent(); }
-      break;
-    case 'Closing':
-      if (event.type === '<done>') { machine.state = 'Closed'; }
-      break;
-  }
+interface ModalContext {
+  data: unknown;
+  error: string | null;
 }
+```
 
-// ── Derived state ──
-const isOpen = computed(() =>
-  ['Opening', 'Loading', 'Success', 'Error', 'Closing'].includes(machine.state)
-);
-const isLoading = computed(() => machine.state === 'Loading');
-const isError = computed(() => machine.state === 'Error');
+```tsx
+const modalConfig: MachineConfig<State, Event, ModalContext> = {
+  initial: 'Closed',
+  context: { data: null, error: null },
+  states: {
+    Closed: {
+      on: {
+        TRIGGER: { target: 'Opening', actions: ['openAnimation'] },
+      },
+    },
+    Opening: {
+      on: {
+        '<done>': { target: 'Loading', actions: ['fetchContent'] },
+        CLOSE: { target: 'Closing' },
+      },
+    },
+    Loading: {
+      on: {
+        FETCH_SUCCESS: { target: 'Success', actions: ['assignData'] },
+        FETCH_ERROR: { target: 'Error', actions: ['assignError'] },
+        CLOSE: { target: 'Closing', guard: 'canAbort' },
+      },
+    },
+    Success: {
+      on: {
+        CLOSE: { target: 'Closing', actions: ['closeAnimation'] },
+      },
+    },
+    Error: {
+      on: {
+        CLOSE: { target: 'Closing' },
+        RETRY: { target: 'Loading', actions: ['fetchContent'] },
+      },
+    },
+    Closing: {
+      on: {
+        '<done>': { target: 'Closed', actions: ['resetContext'] },
+      },
+    },
+  },
+};
+```
 
-// ── Side effects ──
-async function fetchContent() {
-  try {
-    const response = await fetch('/api/data');
-    const data = await response.json();
-    dispatch({ type: 'FETCH_SUCCESS', data });
-  } catch (err) {
-    dispatch({ type: 'FETCH_ERROR', message: (err as Error).message });
-  }
+```tsx
+const modalImpl: MachineImplementations<ModalContext, Event> = {
+  guards: {
+    canAbort: (ctx) => ctx.data === null,
+  },
+  actions: {
+    openAnimation: () => {},
+    closeAnimation: () => {},
+    assignData: (ctx, event) => ({
+      data: (event as { type: 'FETCH_SUCCESS'; data: unknown }).data,
+      error: null,
+    }),
+    assignError: (ctx, event) => ({
+      error: (event as { type: 'FETCH_ERROR'; message: string }).message,
+    }),
+    resetContext: () => ({ data: null, error: null }),
+    fetchContent: async (ctx, event, send) => {
+      try {
+        const res = await fetch('/api/data');
+        const data = await res.json();
+        send({ type: 'FETCH_SUCCESS', data });
+      } catch (err) {
+        send({ type: 'FETCH_ERROR', message: (err as Error).message });
+      }
+    },
+  },
+};
+```
+
+---
+
+## React — useMachine
+
+```tsx
+import { useState, useRef, useCallback } from 'react';
+
+function useMachine<State extends string, Event extends { type: string }, Context>(
+  config: MachineConfig<State, Event, Context>,
+  implementations?: MachineImplementations<Context, Event>
+) {
+  const [state, setState] = useState<State>(config.initial);
+  const [context, setContext] = useState<Context>(config.context);
+  const pendingRef = useRef(false);
+  const stateRef = useRef(state);
+  const contextRef = useRef(context);
+
+  stateRef.current = state;
+  contextRef.current = context;
+
+  const sendRef = useRef<(event: Event, fromAction?: boolean) => void>();
+
+  sendRef.current = (event: Event, fromAction = false) => {
+    if (pendingRef.current && !fromAction) return;
+
+    const currentState = stateRef.current;
+    const currentContext = contextRef.current;
+    const stateCfg = config.states[currentState];
+    const handler = stateCfg?.on?.[event.type];
+    if (!handler) return;
+
+    if (handler.guard) {
+      const guardFn = implementations?.guards?.[handler.guard];
+      if (guardFn && !guardFn(currentContext, event)) return;
+    }
+
+    let newContext = currentContext;
+    const asyncActions: Promise<void>[] = [];
+
+    if (handler.actions) {
+      for (const name of handler.actions) {
+        const actionFn = implementations?.actions?.[name];
+        if (!actionFn) continue;
+        const result = actionFn(newContext, event, (e: Event) => sendRef.current!(e, true));
+        if (result instanceof Promise) {
+          asyncActions.push(result);
+        } else if (result !== undefined) {
+          newContext = { ...newContext, ...result };
+        }
+      }
+    }
+
+    if (asyncActions.length > 0) {
+      pendingRef.current = true;
+      Promise.all(asyncActions).finally(() => {
+        pendingRef.current = false;
+      });
+    }
+
+    if (handler.target) {
+      setContext(newContext);
+      setState(handler.target);
+    }
+  };
+
+  const send = useCallback((event: Event) => sendRef.current!(event), []);
+
+  const matches = useCallback((...states: State[]) =>
+    states.includes(stateRef.current), []);
+
+  const done = config.states[state]?.type === 'final';
+
+  return { state, context, send, matches, done };
 }
+```
+
+### Usage
+
+```tsx
+function Modal() {
+  const { state, context, send, matches } = useMachine(modalConfig, modalImpl);
+
+  if (state === 'Closed') return null;
+
+  return (
+    <div className="modal-backdrop" onClick={() => send({ type: 'CLOSE' })}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        {matches('Opening', 'Closing') && <div className="animating" />}
+        {state === 'Loading' && <div className="loading">Loading...</div>}
+        {state === 'Success' && (
+          <>
+            <button className="close" onClick={() => send({ type: 'CLOSE' })}>&times;</button>
+            <div>{JSON.stringify(context.data)}</div>
+          </>
+        )}
+        {state === 'Error' && (
+          <>
+            <p className="error">{context.error}</p>
+            <button onClick={() => send({ type: 'RETRY' })}>Retry</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### Key points
+
+- `sendRef` pattern avoids stale closures in async action callbacks
+- Guards are named strings in config, mapped to functions in implementations
+- Sync actions return `Partial<Context>` merged into current context
+- Async actions receive a wrapped `send` with `fromAction=true` that bypasses the pending lock
+- `matches(...)` checks current state against one or more values — useful for grouping states
+- `done` is true when the current state has `type: 'final'`
+
+---
+
+## Vue — useMachine
+
+```tsx
+import { ref, computed, readonly } from 'vue';
+
+function useMachine<State extends string, Event extends { type: string }, Context>(
+  config: MachineConfig<State, Event, Context>,
+  implementations?: MachineImplementations<Context, Event>
+) {
+  const state = ref<State>(config.initial);
+  const context = ref<Context>(config.context);
+  const pending = ref(false);
+
+  function send(event: Event, fromAction = false) {
+    if (pending.value && !fromAction) return;
+
+    const handler = config.states[state.value]?.on?.[event.type];
+    if (!handler) return;
+
+    if (handler.guard) {
+      const guardFn = implementations?.guards?.[handler.guard];
+      if (guardFn && !guardFn(context.value, event)) return;
+    }
+
+    let newContext = context.value;
+    const asyncActions: Promise<void>[] = [];
+
+    if (handler.actions) {
+      for (const name of handler.actions) {
+        const actionFn = implementations?.actions?.[name];
+        if (!actionFn) continue;
+        const result = actionFn(newContext, event, (e: Event) => send(e, true));
+        if (result instanceof Promise) {
+          asyncActions.push(result);
+        } else if (result !== undefined) {
+          newContext = { ...newContext, ...result };
+        }
+      }
+    }
+
+    if (asyncActions.length > 0) {
+      pending.value = true;
+      Promise.all(asyncActions).finally(() => { pending.value = false; });
+    }
+
+    if (handler.target) {
+      context.value = newContext;
+      state.value = handler.target;
+    }
+  }
+
+  const matches = (...states: State[]) => states.includes(state.value);
+  const done = computed(() => config.states[state.value]?.type === 'final');
+
+  return { state: readonly(state), context: readonly(context), send, matches, done };
+}
+```
+
+### Usage
+
+```vue
+<script setup lang="ts">
+const { state, context, send, matches } = useMachine(modalConfig, modalImpl);
 </script>
 
 <template>
-  <div v-if="machine.state !== 'Closed'" class="modal-backdrop" @click="dispatch({ type: 'CLOSE' })">
+  <div v-if="state !== 'Closed'" class="modal-backdrop" @click="send({ type: 'CLOSE' })">
     <div class="modal-content" @click.stop>
-      <div v-if="machine.state === 'Opening'" class="animating" />
-      <div v-else-if="isLoading" class="loading"><span class="spinner" /> Loading...</div>
-      <div v-else-if="machine.state === 'Success'" class="body">
-        <button class="close" @click="dispatch({ type: 'CLOSE' })">&times;</button>
-        {{ machine.data }}
+      <div v-if="matches('Opening', 'Closing')" class="animating" />
+      <div v-else-if="state === 'Loading'" class="loading">Loading...</div>
+      <div v-else-if="state === 'Success'">
+        <button class="close" @click="send({ type: 'CLOSE' })">&times;</button>
+        <div>{{ context.data }}</div>
       </div>
-      <div v-else-if="isError" class="body">
-        <p class="error">{{ machine.error }}</p>
-        <button @click="dispatch({ type: 'RETRY' })">Retry</button>
+      <div v-else-if="state === 'Error'">
+        <p class="error">{{ context.error }}</p>
+        <button @click="send({ type: 'RETRY' })">Retry</button>
       </div>
-      <div v-else-if="machine.state === 'Closing'" class="animating" />
     </div>
   </div>
 </template>
@@ -216,125 +388,95 @@ async function fetchContent() {
 
 ### Key points
 
-- `reactive` object holds state AND context — no separate useRef
-- `computed` provides derived booleans from current state
-- Side effects are async functions called from dispatch cases
-- Template uses `v-if` chains matching each state
+- `ref` provides reactive state and context — templates auto-track
+- `readonly` prevents external mutation of state and context
+- `matches` is a plain function that reads `state.value` — Vue's reactivity tracks the dependency during template rendering
+- `done` is a computed ref, updated whenever state changes
 
 ---
 
-## Svelte — writable
+## Svelte — useMachine
 
-Svelte's stores provide the reactive foundation.
+```tsx
+import { writable, derived, get } from 'svelte/store';
 
-### Pattern
+function useMachine<State extends string, Event extends { type: string }, Context>(
+  config: MachineConfig<State, Event, Context>,
+  implementations?: MachineImplementations<Context, Event>
+) {
+  const state = writable<State>(config.initial);
+  const context = writable<Context>(config.context);
+  const pending: { current: boolean } = { current: false };
+
+  function send(event: Event, fromAction = false) {
+    if (pending.current && !fromAction) return;
+
+    const currentState = get(state);
+    const currentContext = get(context);
+    const handler = config.states[currentState]?.on?.[event.type];
+    if (!handler) return;
+
+    if (handler.guard) {
+      const guardFn = implementations?.guards?.[handler.guard];
+      if (guardFn && !guardFn(currentContext, event)) return;
+    }
+
+    let newContext = currentContext;
+    const asyncActions: Promise<void>[] = [];
+
+    if (handler.actions) {
+      for (const name of handler.actions) {
+        const actionFn = implementations?.actions?.[name];
+        if (!actionFn) continue;
+        const result = actionFn(newContext, event, (e: Event) => send(e, true));
+        if (result instanceof Promise) {
+          asyncActions.push(result);
+        } else if (result !== undefined) {
+          newContext = { ...newContext, ...result };
+        }
+      }
+    }
+
+    if (asyncActions.length > 0) {
+      pending.current = true;
+      Promise.all(asyncActions).finally(() => { pending.current = false; });
+    }
+
+    if (handler.target) {
+      context.set(newContext);
+      state.set(handler.target);
+    }
+  }
+
+  const matchesStore = derived(state, ($s) => (...states: State[]) => states.includes($s));
+  const done = derived(state, ($s) => config.states[$s]?.type === 'final');
+
+  const matches = (...states: State[]) => states.includes(get(state));
+
+  return { state, context, send, matches: matchesStore, done };
+}
+```
+
+### Usage
 
 ```svelte
 <script lang="ts">
-import { writable, derived } from 'svelte/store';
-
-// ── Types ──
-type State = 'Closed' | 'Opening' | 'Loading' | 'Success' | 'Error' | 'Closing';
-type Event =
-  | { type: 'TRIGGER' }
-  | { type: '<done>' }
-  | { type: 'FETCH_SUCCESS'; data: unknown }
-  | { type: 'FETCH_ERROR'; message: string }
-  | { type: 'CLOSE' }
-  | { type: 'RETRY' };
-
-// ── Machine store ──
-interface MachineStore {
-  state: State;
-  data: unknown;
-  error: string | null;
-}
-
-const machine = writable<MachineStore>({
-  state: 'Closed',
-  data: null,
-  error: null,
-});
-
-// ── Derived stores ──
-const isOpen = derived(machine, $m =>
-  ['Opening', 'Loading', 'Success', 'Error', 'Closing'].includes($m.state)
-);
-const isLoading = derived(machine, $m => $m.state === 'Loading');
-
-// ── Dispatch ──
-function dispatch(event: Event) {
-  machine.update($m => {
-    switch ($m.state) {
-      case 'Closed':
-        if (event.type === 'TRIGGER') return { ...$m, state: 'Opening' as const };
-        return $m;
-
-      case 'Opening':
-        if (event.type === '<done>') return { ...$m, state: 'Loading' as const };
-        if (event.type === 'CLOSE') return { ...$m, state: 'Closing' as const };
-        return $m;
-
-      case 'Loading':
-        if (event.type === 'FETCH_SUCCESS') {
-          return { ...$m, state: 'Success' as const, data: event.data, error: null };
-        }
-        if (event.type === 'FETCH_ERROR') {
-          return { ...$m, state: 'Error' as const, error: event.message };
-        }
-        return $m;
-
-      case 'Success':
-        if (event.type === 'CLOSE') return { ...$m, state: 'Closing' as const };
-        return $m;
-
-      case 'Error':
-        if (event.type === 'CLOSE') return { ...$m, state: 'Closing' as const };
-        if (event.type === 'RETRY') {
-          fetchContent();
-          return { ...$m, state: 'Loading' as const };
-        }
-        return $m;
-
-      case 'Closing':
-        if (event.type === '<done>') {
-          return { state: 'Closed' as const, data: null, error: null };
-        }
-        return $m;
-
-      default:
-        return $m;
-    }
-  });
-}
-
-async function fetchContent() {
-  try {
-    const res = await fetch('/api/data');
-    const data = await res.json();
-    dispatch({ type: 'FETCH_SUCCESS', data });
-  } catch (err) {
-    dispatch({ type: 'FETCH_ERROR', message: (err as Error).message });
-  }
-}
+const { state, context, send, matches, done } = useMachine(modalConfig, modalImpl);
 </script>
 
-<!-- Template -->
-{#if $machine.state !== 'Closed'}
-<div class="modal-backdrop" on:click={() => dispatch({ type: 'CLOSE' })}>
+{#if $state !== 'Closed'}
+<div class="modal-backdrop" on:click={() => send({ type: 'CLOSE' })}>
   <div class="modal-content" on:click|stopPropagation>
-    {#if $machine.state === 'Opening'}
+    {#if $matches('Opening', 'Closing')}
       <div class="animating" />
-    {:else if $isLoading}
-      <div class="loading"><span class="spinner" /> Loading...</div>
-    {:else if $machine.state === 'Success'}
-      <button class="close" on:click={() => dispatch({ type: 'CLOSE' })}>&times;</button>
-      {$machine.data}
-    {:else if $machine.state === 'Error'}
-      <p class="error">{$machine.error}</p>
-      <button on:click={() => dispatch({ type: 'RETRY' })}>Retry</button>
-    {:else if $machine.state === 'Closing'}
-      <div class="animating" />
+    {:else if $state === 'Loading'}
+      <div class="loading">Loading...</div>
+    {:else if $state === 'Success'}
+      <button class="close" on:click={() => send({ type: 'CLOSE' })}>&times;</button>
+      <div>{JSON.stringify($context.data)}</div>
+    {:else if $state === 'Error'}
+      <p class="error">{$context.error}</p>
+      <button on:click={() => send({ type: 'RETRY' })}>Retry</button>
     {/if}
   </div>
 </div>
@@ -343,149 +485,122 @@ async function fetchContent() {
 
 ### Key points
 
-- `writable` store holds the entire machine state + context in one object
-- `derived` stores provide computed booleans (replaces `computed` in Vue, `useMemo` in React)
-- `machine.update()` is the dispatch function — it receives current state and returns new state
-- The store is reactive by default — no subscriptions needed in the template
+- `writable` stores hold state and context — `$prefix` auto-subscribes in templates
+- `matches` is a `derived` store that returns a function — `$matches(...)` in the template is fully reactive
+- `get()` reads the current value synchronously inside `send` without creating a subscription
+- `pending` is a plain object ref (not a store) since it's internal and doesn't need reactivity
+- `done` is a `derived` boolean store
 
 ---
 
-## Vanilla JS — state object
-
-For any framework or no framework, the state machine is a plain object with a dispatch method.
-
-### Pattern
+## Vanilla JS — createMachine
 
 ```ts
-// ── Types ──
-type State = 'Closed' | 'Opening' | 'Loading' | 'Success' | 'Error' | 'Closing';
-type Event =
-  | { type: 'TRIGGER' }
-  | { type: '<done>' }
-  | { type: 'FETCH_SUCCESS'; data: unknown }
-  | { type: 'FETCH_ERROR'; message: string }
-  | { type: 'CLOSE' }
-  | { type: 'RETRY' };
-
-interface MachineContext {
-  data: unknown;
-  error: string | null;
-}
-
-// ── Machine factory ──
-function createModalMachine(options: {
-  fetchData?: () => Promise<unknown>;
-  onOpen?: () => void;
-  onClose?: () => void;
-} = {}) {
-  let state: State = 'Closed';
-  let context: MachineContext = { data: null, error: null };
+function createMachine<State extends string, Event extends { type: string }, Context>(
+  config: MachineConfig<State, Event, Context>,
+  implementations?: MachineImplementations<Context, Event>
+) {
+  let state: State = config.initial;
+  let context: Context = { ...config.context };
+  let pending = false;
   const listeners = new Set<() => void>();
 
-  function dispatch(event: Event) {
-    const prevState = state;
+  function send(event: Event, fromAction = false) {
+    if (pending && !fromAction) return;
 
-    switch (state) {
-      case 'Closed':
-        if (event.type === 'TRIGGER') { state = 'Opening'; options.onOpen?.(); }
-        break;
-      case 'Opening':
-        if (event.type === '<done>') { state = 'Loading'; fetchContent(); }
-        if (event.type === 'CLOSE') { state = 'Closing'; }
-        break;
-      case 'Loading':
-        if (event.type === 'FETCH_SUCCESS') {
-          context = { data: event.data, error: null };
-          state = 'Success';
-        }
-        if (event.type === 'FETCH_ERROR') {
-          context = { data: null, error: event.message };
-          state = 'Error';
-        }
-        break;
-      case 'Success':
-        if (event.type === 'CLOSE') { state = 'Closing'; }
-        break;
-      case 'Error':
-        if (event.type === 'CLOSE') { state = 'Closing'; }
-        if (event.type === 'RETRY') { state = 'Loading'; fetchContent(); }
-        break;
-      case 'Closing':
-        if (event.type === '<done>') { state = 'Closed'; options.onClose?.(); }
-        break;
+    const handler = config.states[state]?.on?.[event.type];
+    if (!handler) return;
+
+    if (handler.guard) {
+      const guardFn = implementations?.guards?.[handler.guard];
+      if (guardFn && !guardFn(context, event)) return;
     }
 
-    if (state !== prevState) {
+    let newContext = context;
+    const asyncActions: Promise<void>[] = [];
+
+    if (handler.actions) {
+      for (const name of handler.actions) {
+        const actionFn = implementations?.actions?.[name];
+        if (!actionFn) continue;
+        const result = actionFn(newContext, event, (e: Event) => send(e, true));
+        if (result instanceof Promise) {
+          asyncActions.push(result);
+        } else if (result !== undefined) {
+          newContext = { ...newContext, ...result };
+        }
+      }
+    }
+
+    if (asyncActions.length > 0) {
+      pending = true;
+      Promise.all(asyncActions).finally(() => { pending = false; });
+    }
+
+    if (handler.target) {
+      context = newContext;
+      state = handler.target;
       listeners.forEach(fn => fn());
-    }
-  }
-
-  async function fetchContent() {
-    if (!options.fetchData) return;
-    try {
-      const data = await options.fetchData();
-      dispatch({ type: 'FETCH_SUCCESS', data });
-    } catch (err) {
-      dispatch({ type: 'FETCH_ERROR', message: (err as Error).message });
     }
   }
 
   return {
     getState: () => state,
     getContext: () => context,
-    dispatch,
+    send: (event: Event) => send(event),
     subscribe: (fn: () => void) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    matches: (...states: State[]) => states.includes(state),
   };
 }
+```
 
-// ── Usage ──
-const modal = createModalMachine({
-  fetchData: () => fetch('/api/data').then(r => r.json()),
-});
+### Usage
+
+```ts
+const modal = createMachine(modalConfig, modalImpl);
 
 modal.subscribe(() => {
   render(modal.getState(), modal.getContext());
 });
 
-function render(state: State, context: MachineContext) {
+function render(state: State, context: ModalContext) {
   const container = document.getElementById('modal-root');
   if (!container) return;
 
-  if (state === 'Closed') {
-    container.innerHTML = '';
-    return;
+  if (state === 'Closed') { container.innerHTML = ''; return; }
+
+  let content = '';
+  if (modal.matches('Opening', 'Closing')) {
+    content = '<div class="animating"></div>';
+  } else if (state === 'Loading') {
+    content = '<div class="loading">Loading...</div>';
+  } else if (state === 'Success') {
+    content = `
+      <button class="close" onclick="modal.send({type:'CLOSE'})">&times;</button>
+      <div>${JSON.stringify(context.data)}</div>`;
+  } else if (state === 'Error') {
+    content = `
+      <p class="error">${context.error}</p>
+      <button onclick="modal.send({type:'RETRY'})">Retry</button>`;
   }
 
   container.innerHTML = `
-    <div class="modal-backdrop">
-      <div class="modal-content">
-        ${state === 'Opening' ? '<div class="animating"></div>' : ''}
-        ${state === 'Loading' ? '<div class="loading">Loading...</div>' : ''}
-        ${state === 'Success' ? `
-          <button class="close" onclick="modal.dispatch({type:'CLOSE'})">&times;</button>
-          <div>${JSON.stringify(context.data)}</div>
-        ` : ''}
-        ${state === 'Error' ? `
-          <p class="error">${context.error}</p>
-          <button onclick="modal.dispatch({type:'RETRY'})">Retry</button>
-        ` : ''}
-        ${state === 'Closing' ? '<div class="animating"></div>' : ''}
-      </div>
-    </div>
-  `;
+    <div class="modal-backdrop" onclick="modal.send({type:'CLOSE'})">
+      <div class="modal-content" onclick="event.stopPropagation()">${content}</div>
+    </div>`;
 }
 ```
 
 ### Key points
 
-- The machine is a closure with `let state` and `let context`
-- `dispatch` is the only way to change state — no external mutations
+- Machine is a closure — no external mutation of state or context
 - `subscribe` returns an unsubscribe function (same pattern as Svelte stores)
-- The machine is framework-agnostic; rendering is handled by the subscriber
-- Testable: create a machine, dispatch events, assert state
+- `matches` is a plain function for checking current state
+- `getState()` / `getContext()` provide read-only access
+- No framework dependency — testable in isolation
 
 ---
 
@@ -493,13 +608,13 @@ function render(state: State, context: MachineContext) {
 
 | Aspect | React | Vue | Svelte | Vanilla |
 |--------|-------|-----|--------|---------|
-| State container | `useReducer` | `reactive()` | `writable()` | Closure |
-| Derived values | `useMemo` | `computed()` | `derived()` | Computed in getter |
-| Side effects | `useEffect` | `watch()` / async | Reactive statements | Subscriber pattern |
-| TypeScript | Native | `defineComponent` | `lang="ts"` | Native |
-| Testability | Export reducer | Export dispatch | Export store | Export machine |
-| Learning curve | Low | Medium | Low | Low |
-| XState integration | `@xstate/react` | `@xstate/vue` | `@xstate/svelte` | Direct `createMachine()` |
+| Adapter | `useMachine(config, impl)` | `useMachine(config, impl)` | `useMachine(config, impl)` | `createMachine(config, impl)` |
+| Reactive state | `useState` + `useRef` | `ref` + `readonly` | `writable` store | Closure `let` |
+| State queries | `matches(...)` function | `matches(...)` function | `$matches(...)` derived store function | `matches(...)` function |
+| Completion flag | `done` boolean | `done` computed ref | `$done` derived store | User-defined |
+| Async lock | `useRef(false)` | `ref(false)` | Plain `{ current: false }` | Plain `boolean` |
+| Side effects | Async actions | Async actions | Async actions | Async actions |
+| XState alt | `@xstate/react` | `@xstate/vue` | `@xstate/svelte` | `createMachine()` |
 
 ---
 
@@ -507,14 +622,12 @@ function render(state: State, context: MachineContext) {
 
 | Your stack | Adapter |
 |------------|---------|
-| React 18+ with hooks | `useReducer` |
-| React with XState | `@xstate/react` (`useMachine`) |
-| Vue 3 Composition API | `reactive` + `computed` |
-| Vue with XState | `@xstate/vue` |
-| Svelte 4+ | `writable` + `derived` |
-| Svelte with XState | `@xstate/svelte` |
-| No framework / any framework | Vanilla closure |
-| Need full XState tooling (inspect, typegen) | XState adapter |
+| React 18+ | `useMachine(config, implementations)` |
+| Vue 3 Composition API | `useMachine(config, implementations)` |
+| Svelte 4+ | `useMachine(config, implementations)` |
+| No framework / any framework | `createMachine(config, implementations)` |
+| Declarative config with named actions/guards | Config + implementations pattern |
+| Need full XState tooling (inspect, typegen) | XState adapter (`@xstate/react`, etc.) |
 
 ---
 

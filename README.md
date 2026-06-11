@@ -4,7 +4,7 @@
 
 **Model UI behavior before you code it. Eliminate impossible states before they exist.**
 
-[![npm version](https://img.shields.io/npm/v/state-machine-skill)](https://www.npmjs.com/package/state-machine-skill)
+[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.1.0)](https://www.npmjs.com/package/state-machine-skill)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Works with Claude Code](https://img.shields.io/badge/Claude%20Code-ready-7C3AED)](https://claude.ai)
 [![Works with Cursor](https://img.shields.io/badge/Cursor-ready-000000)](https://cursor.com)
@@ -61,7 +61,7 @@ const [state, setState] = useState<State>('Idle');
 ```
 ┌──────────┐     ┌───────────┐     ┌────────────┐     ┌──────────┐
 │ Describe │────>│ Model it  │────>│ Validate   │────>│ Generate │
-│ behavior │     │ (states,  │     │ (35 gates) │     │ code     │
+│ behavior │     │ (states,  │     │ (38 gates) │     │ code     │
 │ in NL    │     │ events)   │     │            │     │          │
 └──────────┘     └───────────┘     └────────────┘     └──────────┘
 ```
@@ -217,7 +217,7 @@ The state alphabet IS the specification. If a state isn't in the alphabet, the c
 cannot enter it. Not by accident, not by race condition, not by a missed code path.
 
 **The model is the source of truth.** Code is generated from the model, not the other way
-around. The 35 validation gates (see `references/slop-gates.md`) catch every common mistake
+around. The 38 validation gates (see `references/slop-gates.md`) catch every common mistake
 before it reaches your codebase. The result is a component that is provably correct with
 respect to its state model — and a test suite that covers every transition, every guard,
 and every action.
@@ -263,7 +263,7 @@ See [`references/xstate-compat.md`](references/xstate-compat.md) for the full ma
 | [`references/state-theory.md`](references/state-theory.md) | FSM/HFSM fundamentals applied to UI |
 | [`references/component-patterns.md`](references/component-patterns.md) | 12 canonical patterns with models and invariants |
 | [`references/impossible-states.md`](references/impossible-states.md) | 35 anti-patterns with elimination strategies |
-| [`references/slop-gates.md`](references/slop-gates.md) | 35 validation gates every output must pass |
+| [`references/slop-gates.md`](references/slop-gates.md) | 38 validation gates every output must pass |
 | [`references/xstate-compat.md`](references/xstate-compat.md) | Mapping every pattern to XState v5 |
 | [`references/framework-adapters.md`](references/framework-adapters.md) | React, Vue, Svelte, Vanilla adapters |
 
@@ -276,18 +276,36 @@ npx validate-state-machine path/to/model.json
 # or: npm run validate -- path/to/model.json
 ```
 
-Zero dependencies. Runs gates 01–10. Exit code 0 = valid, 1 = invalid with gate report.
+Zero dependencies. Runs gates 01–13. Exit code 0 = valid, 1 = invalid with gate report.
+
+**Fast-track mode** (omits linguistic warnings, compact output):
+```bash
+npm run validate -- path/to/model.json --light
+```
+
+**ASCII diagram standalone** (no validation, just the graph):
+```bash
+node scripts/ascii-viz.js path/to/model.json
+```
+
+New in 1.1.0:
+- **Gates 11–13**: validates `actions` node, transition action references, state lifecycle hooks (`onEnter`/`onExit`)
+- **State objects**: states can be `{ name, onEnter, onExit, type }` instead of plain strings
+- **--light flag**: fast-track validation skips warnings, renders compact diagram
+- **ASCII visualizer**: `scripts/ascii-viz.js` draws transition graphs in the terminal
 
 ---
 
 ## Framework support
 
+All frameworks use the unified `useMachine(config, implementations)` pattern:
+
 | Framework | Mechanism |
-|-----------|-----------|
-| React | `useReducer` + dispatch |
-| Vue | `reactive()` + `computed()` |
-| Svelte | `writable()` + `derived()` |
-| Vanilla JS | Object + `dispatch()` |
+|-----------|----------|
+| React | `useMachine(config, impl)` — `useState` + `useRef` |
+| Vue | `useMachine(config, impl)` — `ref` + `readonly` |
+| Svelte | `useMachine(config, impl)` — `writable` store |
+| Vanilla JS | `createMachine(config, impl)` — closure factory |
 | XState v5 | `setup()` + `createMachine()` |
 
 ---

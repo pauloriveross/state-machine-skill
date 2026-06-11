@@ -173,7 +173,11 @@ The component MUST ALWAYS:
 
 ### Validation gates applied
 
-After producing the model, apply gates 1–20 from `references/slop-gates.md`. Report any failures.
+After producing the model, apply gates 1–23 from `references/slop-gates.md`. Report any failures.
+
+**Note:** Gates 06 (state names) and 07 (event names) use a **score/tolerance** system defined in `scripts/linguistic-analyzer.js`. Scores ≥ 0.7 produce non-blocking warnings instead of errors. Scores < 0.7 are hard failures.
+
+**Fast-track:** `node scripts/validate-model.js model.json --light` skips linguistic warnings and renders a compact ASCII diagram for quick feedback.
 
 ---
 
@@ -283,7 +287,11 @@ If the implementation requires something not in the model (e.g., a "submitting" 
 
 ### Validation gates applied
 
-After generating code, apply gates 1–35 from `references/slop-gates.md`. Report any failures.
+After generating code, apply gates 1–38 from `references/slop-gates.md`. Report any failures.
+
+**Note:** Gates 06 and 07 use the score/tolerance system from `scripts/linguistic-analyzer.js`. Non-blocking warnings are printed for marginal scores (≥ 0.7).
+
+**Fast-track:** `node scripts/validate-model.js model.json --light` for compact validation output.
 
 ---
 
@@ -371,7 +379,7 @@ Run `implement <framework> <description>` to generate a clean implementation.
 
 ### Validation gates applied
 
-After producing the audit, apply gates 21–35 from `references/slop-gates.md`. Report any failures.
+After producing the audit, apply gates 24–38 from `references/slop-gates.md`. Report any failures.
 
 ---
 

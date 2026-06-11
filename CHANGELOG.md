@@ -6,7 +6,7 @@
 - Three verbs: `model`, `implement`, `audit`.
 - 12 canonical component patterns.
 - 35 anti-pattern catalog with elimination strategies.
-- 35 validation gates (slop gates).
+- 38 validation gates (slop gates).
 - XState v5 compatibility reference.
 - Framework adapters: React, Vue, Svelte, Vanilla.
 - CLI validation script.
