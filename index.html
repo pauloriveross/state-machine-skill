@@ -11,9 +11,11 @@
   /* ── Reset & Base ── */
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
-  body{background:#0D0F12;color:#E2E8F0;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;overflow-x:hidden}
+  body{background:#0D0F12;color:#E2E8F0;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;overflow-x:hidden;word-break:break-word;overflow-wrap:break-word}
   a{color:inherit;text-decoration:none}
   pre,code,.font-mono{font-family:'JetBrains Mono',monospace}
+  pre{overflow-x:auto;max-width:100%}
+  img{max-width:100%;height:auto}
 
   /* ── Colors ── */
   :root{
@@ -36,7 +38,6 @@
   .section{padding:96px 0}
   .section-title{font-size:14px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
   .section-heading{font-size:36px;font-weight:700;line-height:1.2;margin-bottom:16px}
-  @media(max-width:768px){.section-heading{font-size:28px}.section{padding:64px 0}}
 
   /* ── Glass card ── */
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;transition:transform .25s ease,box-shadow .25s ease, border-color .25s ease}
@@ -80,14 +81,15 @@
   nav .container{display:flex;align-items:center;justify-content:space-between;height:64px}
   .nav-links{display:flex;gap:32px;font-size:14px;font-weight:500;color:var(--muted)}
   .nav-links a:hover{color:var(--text)}
+  .nav-github{display:inline}
 
   /* ── Hero ── */
   .hero{min-height:100vh;display:flex;align-items:center;position:relative;overflow:hidden;padding-top:64px}
   .hero-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0.15;pointer-events:none}
-  .hero-content{position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+  .hero-content{position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
   .hero-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--cyan);padding:6px 12px;border:1px solid var(--cyan);border-radius:999px;margin-bottom:24px}
-  .hero-left{max-width:520px}
-  .hero-right{justify-self:end;width:100%;max-width:440px}
+  .hero-left{max-width:520px;justify-self:start}
+  .hero-right{justify-self:end}
   .hero h1{font-size:56px;font-weight:800;line-height:1.1;letter-spacing:-0.03em;margin-bottom:16px}
   .hero h1 em{color:var(--violet);font-style:italic}
   .hero p{font-size:17px;color:var(--muted);margin-bottom:28px}
@@ -99,8 +101,6 @@
   .hero-compat-dot.cyan{background:var(--cyan)}
   .hero-compat-dot.amber{background:#F59E0B}
   .hero-compat-dot.green{background:var(--green)}
-  @media(max-width:900px){.hero-content{grid-template-columns:1fr;gap:48px;text-align:center}.hero-left{max-width:none}.hero-right{justify-self:center}.hero p{margin-left:auto;margin-right:auto}.hero-actions{justify-content:center}}
-  @media(max-width:768px){.hero h1{font-size:36px}.hero{min-height:90vh}}
 
   /* ── State Diagram SVG nodes ── */
   .svg-node-pulse{animation:nodePulse 2.5s ease-in-out infinite;transform-origin:center}
@@ -111,14 +111,13 @@
 
   /* ── Problem/Solution ── */
   .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  @media(max-width:768px){.split-grid{grid-template-columns:1fr}}
   .code-block{border-radius:8px;padding:16px;overflow-x:auto;font-size:13px;line-height:1.7}
+  .code-block pre{overflow-x:auto}
   .code-block-red{background:rgba(239,68,68,0.06);border-left:3px solid var(--red)}
   .code-block-green{background:rgba(34,197,94,0.06);border-left:3px solid var(--green)}
 
   /* ── Verb grid ── */
   .verb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-  @media(max-width:768px){.verb-grid{grid-template-columns:1fr}}
   .verb-icon{width:56px;height:56px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;margin-bottom:16px;border:1px solid var(--border)}
 
   /* ── Terminal ── */
@@ -156,6 +155,101 @@
   footer .links{display:flex;gap:24px;font-size:14px;color:var(--muted)}
   footer .links a:hover{color:var(--text)}
   .footer-badge{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+
+  /* ── Media Queries ── */
+
+  /* 1024px — tablet landscape / small laptop */
+  @media(max-width:1024px){
+    .hero h1{font-size:44px}
+    .hero-content{gap:40px}
+    .hero-right{max-width:380px}
+    .verb-grid{gap:16px}
+    .verb-icon{width:48px;height:48px;font-size:17px}
+  }
+
+  /* 900px — hero collapses, nav gap shrinks */
+  @media(max-width:900px){
+    .hero-content{grid-template-columns:1fr;gap:48px;text-align:center}
+    .hero-left{max-width:none;justify-self:auto}
+    .hero-right{justify-self:auto}
+    .hero p{margin-left:auto;margin-right:auto}
+    .hero-actions{justify-content:center}
+    .nav-links{gap:20px}
+    .hero-bg svg{width:400px;height:340px;transform:scale(0.8)}
+    .hero-compat{flex-wrap:wrap;gap:10px;justify-content:center}
+    .compat-grid{gap:16px}
+    .compat-item{font-size:13px;padding:10px 16px}
+  }
+
+  /* 768px — grid collapses, spacing reduces, fonts shrink */
+  @media(max-width:768px){
+    .container{padding:0 20px}
+    .section{padding:64px 0}
+    .section-heading{font-size:28px}
+    .hero{min-height:auto;padding:120px 0 80px}
+    .hero h1{font-size:36px}
+    .hero p{font-size:15px}
+    .hero-bg svg{width:300px;height:260px;transform:scale(0.6);opacity:0.4}
+    .hero-badge{font-size:11px;padding:5px 10px}
+    .hero-actions .btn{padding:10px 18px;font-size:14px}
+    .hero-install-label{font-size:11px}
+    .hero-right{max-width:340px}
+    .split-grid{grid-template-columns:1fr}
+    .verb-grid{grid-template-columns:1fr}
+    .verb-icon{width:44px;height:44px;font-size:15px}
+    .code-block{font-size:12px;padding:12px}
+    .terminal-body{font-size:13px;padding:16px}
+    .terminal-body [style*="padding:12px"]{font-size:11px!important;padding:10px!important;line-height:1.5!important}
+    .compat-item{font-size:12px;padding:8px 14px;gap:6px}
+    .snippet-code{font-size:13px;padding:12px 16px}
+    .snippet-copy{font-size:12px;padding:12px 16px}
+    footer{padding:32px 0;margin-top:64px}
+    footer .container{flex-direction:column;text-align:center}
+    footer .links{justify-content:center}
+    .footer-badge img{max-width:100%}
+  }
+
+  /* 600px — nav starts to squeeze */
+  @media(max-width:600px){
+    .nav-links{gap:16px;font-size:13px}
+    nav .container{height:56px}
+    nav .container > div:first-child{font-size:16px!important}
+  }
+
+  /* 480px — small phones */
+  @media(max-width:480px){
+    .container{padding:0 16px}
+    .hero{min-height:auto;padding:100px 0 60px}
+    .hero h1{font-size:28px;letter-spacing:-0.02em}
+    .hero p{font-size:14px;margin-bottom:20px}
+    .hero-content{gap:32px}
+    .hero-bg{display:none}
+    .hero-badge{margin-bottom:16px}
+    .hero-actions{gap:8px;flex-direction:column}
+    .hero-actions .btn{width:100%;justify-content:center}
+    .hero-right{max-width:100%}
+    .hero-compat{font-size:12px;gap:8px;justify-content:center}
+    .snippet{flex-direction:column}
+    .snippet-code{padding:12px 14px;font-size:13px}
+    .snippet-copy{width:100%;border-left:none;border-top:1px solid var(--border);padding:10px;text-align:center}
+    .section-heading{font-size:24px}
+    .card{padding:18px}
+    .code-block{font-size:11px;padding:10px;line-height:1.5}
+    .terminal-body{font-size:12px;padding:12px}
+    .terminal-body [style*="padding:12px"]{font-size:10px!important;padding:8px!important}
+    .compat-grid{flex-direction:column;align-items:center}
+    .compat-item{width:100%;max-width:260px;justify-content:center}
+    footer p,footer .links{font-size:13px}
+  }
+
+  /* 380px — very small phones */
+  @media(max-width:380px){
+    .container{padding:0 12px}
+    nav .container{height:48px}
+    .nav-links{gap:10px;font-size:12px}
+    nav .container > div:first-child{font-size:14px!important}
+    .nav-github{display:none}
+  }
 </style>
 </head>
 <body>
@@ -169,7 +263,7 @@
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#demo">Demo</a>
-      <a href="https://github.com" target="_blank">GitHub</a>
+      <a href="https://github.com" target="_blank" class="nav-github">GitHub</a>
     </div>
   </div>
 </nav>
@@ -360,7 +454,7 @@ switch (state) {
           <div style="color:var(--green)">&#10003; 3 guards defined</div>
           <div style="color:var(--green)">&#10003; 5 actions extracted</div>
           <div style="color:var(--cyan);margin-top:8px">Output: model.json</div>
-          <div style="margin-top:12px;padding:12px;background:#080A0D;border-radius:6px;border:1px solid var(--border);font-size:13px;line-height:1.8;color:#CBD5E1">
+           <div style="margin-top:12px;padding:12px;background:#080A0D;border-radius:6px;border:1px solid var(--border);font-size:13px;line-height:1.8;color:#CBD5E1;overflow-x:auto;white-space:nowrap">
 ┌────────┐ TRIGGER ┌──────────┐ &lt;done&gt; ┌──────────┐<br>
 │ Closed │────────&gt;│ Opening  │───────&gt;│ Loading  │<br>
 └────────┘         └──────────┘        └────┬─────┘<br>
