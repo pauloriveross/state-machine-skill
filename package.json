@@ -1,11 +1,19 @@
 {
   "name": "state-machine-skill",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI agent skill: model UI components as finite state machines before coding. Claude Code · Cursor · Windsurf · OpenCode",
   "keywords": [
-    "claude-code", "agent-skill", "SKILL.md", "state-machine",
-    "xstate", "finite-state-machine", "cursor", "windsurf",
-    "opencode", "ai-coding", "ui-patterns"
+    "claude-code",
+    "agent-skill",
+    "SKILL.md",
+    "state-machine",
+    "xstate",
+    "finite-state-machine",
+    "cursor",
+    "windsurf",
+    "opencode",
+    "ai-coding",
+    "ui-patterns"
   ],
   "main": "SKILL.md",
   "files": [
