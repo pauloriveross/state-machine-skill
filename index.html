@@ -314,7 +314,7 @@
     <div class="hero-left">
       <div class="hero-badge">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:nodePulse 2s infinite"></span>
-        v1.1.0 — Available Now
+        v1.2.2 — Available Now
       </div>
       <h1>No more <em>impossible</em> states</h1>
       <p>Model UI components as finite state machines before writing code. Compatible with Claude Code, Cursor, Windsurf, and OpenCode.</p>
@@ -326,7 +326,7 @@
     <div class="hero-right">
       <div class="hero-install-label">Quick install</div>
       <div class="snippet" id="snippet">
-        <div class="snippet-code"><span>$</span> npx skills add state-machine-skill</div>
+        <div class="snippet-code"><span>$</span> npx skills add pauloriveross/state-machine-skill</div>
         <button class="snippet-copy" id="copy-btn">Copy</button>
       </div>
       <div class="hero-compat">
@@ -570,7 +570,7 @@ switch (state) {
   // ── Copy to clipboard ──
   const copyBtn = document.getElementById('copy-btn');
   copyBtn.addEventListener('click', async function() {
-    const text = 'npx skills add state-machine-skill';
+    const text = 'npx skills add pauloriveross/state-machine-skill';
     try {
       await navigator.clipboard.writeText(text);
       this.textContent = 'Copied!';

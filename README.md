@@ -4,7 +4,7 @@
 
 **Model UI behavior before you code it. Eliminate impossible states before they exist.**
 
-[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.2.0)](https://www.npmjs.com/package/state-machine-skill)
+[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.2.2)](https://www.npmjs.com/package/state-machine-skill)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Works with Claude Code](https://img.shields.io/badge/Claude%20Code-ready-7C3AED)](https://claude.ai)
 [![Works with Cursor](https://img.shields.io/badge/Cursor-ready-000000)](https://cursor.com)
@@ -92,8 +92,8 @@ This component **cannot** enter a state that was not explicitly modeled.
 
 | Agent | Command |
 |-------|---------|
-| **Any agent** | `npx skills add state-machine-skill` |
-| **Claude Code** | `npx skills add state-machine-skill` — installs to `~/.claude/skills/state-machine/` |
+| **Any agent** | `npx skills add pauloriveross/state-machine-skill` |
+| **Claude Code** | `npx skills add pauloriveross/state-machine-skill` — installs to `~/.claude/skills/state-machine/` |
 | **Cursor** | Copy `SKILL.md` body → `.cursor/rules/state-machine.mdc`, references → `.cursor/rules/state-machine/` |
 | **Windsurf** | `cp SKILL.md .windsurf/rules/state-machine.md` + `cp -r references .windsurf/rules/state-machine-references/` |
 | **OpenCode** | `cp -r * .agent/skills/state-machine/` |
