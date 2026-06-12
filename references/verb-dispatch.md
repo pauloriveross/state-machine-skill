@@ -34,150 +34,133 @@ model a modal dialog that opens when a button is clicked, shows a loading spinne
 
 ### Output requirements
 
-You MUST produce each of the following sections, in order:
+You MUST return exactly **4 sections**, in order, with no extra text before or after:
 
-#### 1. Named states with clear semantics
+#### Section 1 — Behavior Specification
 
-List every state the component can occupy. Each state has:
-- **Name** (PascalCase)
-- **Description** (what the user sees)
-- **Is it a final/terminal state?** (yes/no)
-
-```
-### States
-
-| State        | Description                          | Terminal |
-|--------------|--------------------------------------|----------|
-| Closed       | Modal is not visible                 | No       |
-| Opening      | Modal is animating in                | No       |
-| Loading      | Spinner is visible, fetching data    | No       |
-| Success      | Content is displayed                 | No       |
-| Error        | Error message is displayed           | No       |
-| Closing      | Modal is animating out               | No       |
-```
-
-Empty/atoms states MUST be listed first. The initial state is always listed first.
-
-#### 2. Transition table
-
-A complete state × event matrix. Every (state, event) pair maps to exactly one of:
-- A target state
-- A guard expression (conditionally selects target)
-- The same state (self-transition, allowed only with an action)
-- "Not handled" (explicitly documented — component stays in place)
+Rephrase the user's description as a concise specification paragraph.
 
 Format:
-
 ```
-### Transitions
-
-| From        | Event         | Guard          | To        | Actions                 |
-|-------------|---------------|----------------|-----------|-------------------------|
-| Closed      | OPEN          | —              | Opening   | onOpen callback         |
-| Opening     | <done>        | —              | Loading   | fetchData()             |
-| Loading     | FETCH_SUCCESS | —              | Success   | setData(response)       |
-| Loading     | FETCH_ERROR   | —              | Error     | setError(err)           |
-| Success     | CLOSE         | —              | Closing   | —                       |
-| Error       | CLOSE         | —              | Closing   | —                       |
-| Error       | RETRY         | —              | Loading   | fetchData()             |
-| Closing     | <done>        | —              | Closed    | onClose callback        |
-| Any except  | CLOSE         | isDismissible  | Closing   | —                       |
+## 1. Behavior Specification
+A modal component that opens on a trigger event, shows a loading spinner while...
 ```
 
-The header row MUST use exactly these column names: `From`, `Event`, `Guard`, `To`, `Actions`.
+#### Section 2 — Structural Contract (`model.json`)
 
-#### 3. Guard definitions
+Present the validated JSON inside a `json` code block. This JSON MUST:
+- Strictly conform to `schemas/fsm.schema.json`
+- Use the hierarchical format (`id`, `initial`, `states` as object)
+- Include `onEnter`, `actions`, and `guard` references where applicable
+- Be the exact JSON that passed `validate-model.js`
 
-Every guard referenced in the transition table must be defined here. A guard is a pure boolean function with a single responsibility.
-
+Format:
 ```
-### Guards
-
-| Guard           | Expression                           | Purpose                         |
-|-----------------|--------------------------------------|---------------------------------|
-| isDismissible   | props.dismissible === true           | Only close if dismissible prop  |
-| hasMinLength    | context.input.length >= 3            | Enable next step                |
-| isLastStep      | context.step === totalSteps - 1      | Last step shows "Submit"        |
+## 2. Structural Contract (`model.json`)
+```json
+{
+  "id": "async-modal",
+  "initial": "Closed",
+  "states": { ... }
+}
 ```
-
-Header row: `Guard`, `Expression`, `Purpose`.
-
-#### 4. Actions (side effects)
-
-Every action referenced in the transition table must be defined here. Actions describe what happens outside the state machine (network calls, DOM mutations, analytics, callbacks).
-
-```
-### Actions
-
-| Action        | Effect                                         | Async? |
-|---------------|------------------------------------------------|--------|
-| fetchData()   | GET /api/data, dispatches FETCH_SUCCESS/ERROR  | Yes    |
-| setData(d)    | Stores response in context                    | No     |
-| setError(e)   | Stores error message in context               | No     |
-| onOpen cb     | Calls props.onOpen() if provided              | No     |
-| onClose cb    | Calls props.onClose() if provided             | No     |
 ```
 
-Header row: `Action`, `Effect`, `Async?`.
+#### Section 3 — Transition Diagram (ASCII)
 
-#### 5. ASCII state diagram
+Run `node scripts/ascii-viz.js .state-machine/temp-model.json` and include its output inside a code block.
 
-A visual representation of the automaton using only ASCII characters.
-
+Format:
 ```
-                    ┌─────────────────────────────────────┐
-                    │              CLOSE                  │
-                    v                                     │
-┌────────┐   OPEN   ┌──────────┐  <done>  ┌──────────┐   │
-│ Closed │────────> │ Opening  │────────> │ Loading  │   │
-└────────┘          └──────────┘          └────┬─────┘   │
-                                               │         │
-                              ┌────────────────┼────┐    │
-                              v                v    │    │
-                         ┌─────────┐     ┌─────────┐ │    │
-                         │ Success │     │  Error  │ │    │
-                         └────┬────┘     └────┬────┘ │    │
-                              │               │      │    │
-                              └───────┬───────┘      │    │
-                                      │ RETRY        │    │
-                                      v              │    │
-                                  ┌────────┐         │    │
-                                  │Closing │<────────┘    │
-                                  └───┬────┘  CLOSE       │
-                                      │                   │
-                                      │ <done>            │
-                                      v                   │
-                                  ┌────────┐             │
-                                  │ Closed │──────────────┘
-                                  └────────┘
+## 3. Transition Diagram (ASCII)
+```
+┌────────┐ TRIGGER  ┌─────────┐
+│ Closed │─────────>│ Loading │
+└────────┘          └─────────┘
+```
 ```
 
-#### 6. Invariant declaration
+#### Section 4 — Production Implementation (`implement`)
 
-A formal statement of what the component guarantees.
+Generate a reference implementation using `createLightMachine` from `src/core/fsm.ts`. The code MUST:
+
+1. **Declare config** — identical to the JSON contract in Section 2
+2. **Declare implementations** — isolate side effects into named `actions` and `guards` objects
+3. **Initialize the machine** — `createLightMachine(config, implementations, onStateChange)`
+4. **Use descriptive action names** — e.g., `fetchData`, `storeData`, `logError`, `clearData`
+
+Format:
+```
+## 4. Production Implementation (`implement`)
+```ts
+import { createLightMachine } from '../src/core/fsm';
+
+const config = { ... };
+const implementations = { actions: { ... }, guards: { ... } };
+const machine = createLightMachine(config, implementations, (nextState) => { ... });
+```
+```
+
+### Complete example output
+
+For a toggle, the agent produces:
+
+`````
+## 1. Behavior Specification
+A simple toggle switch with two states — On and Off. Clicking the toggle flips between the two states.
+
+## 2. Structural Contract (`model.json`)
+
+```json
+{
+  "id": "toggle",
+  "initial": "Off",
+  "states": {
+    "Off": { "type": "atomic", "on": { "TOGGLE": { "target": "On", "actions": ["onChange"] } } },
+    "On":  { "type": "atomic", "on": { "TOGGLE": { "target": "Off", "actions": ["onChange"] } } }
+  }
+}
+```
+
+## 3. Transition Diagram (ASCII)
 
 ```
-### Invariants
-
-The component MUST NEVER:
-- Be in `Loading` and `Success` simultaneously
-- Be in `Loading` and `Error` simultaneously
-- Be in `Success` and `Error` simultaneously
-- Transition from `Closed` to anything other than `Opening`
-- Be in an unnamed or intermediate state
-
-The component MUST ALWAYS:
-- Return to `Closed` after `Closing` completes
-- Handle every event in every state (unhandled events are silently ignored)
+┌────────┐  TOGGLE  ┌────────┐
+│  Off   │─────────>│   On   │
+└────────┘<─────────└────────┘
+             TOGGLE
 ```
+
+## 4. Production Implementation (`implement`)
+
+```ts
+import { createLightMachine } from '../src/core/fsm';
+
+const toggleConfig = {
+  id: "toggle",
+  initial: "Off",
+  states: {
+    Off: { type: "atomic", on: { TOGGLE: { target: "On", actions: ["onChange"] } } },
+    On:  { type: "atomic", on: { TOGGLE: { target: "Off", actions: ["onChange"] } } }
+  }
+};
+
+const implementations = {
+  actions: {
+    onChange: (context: any) => { context.value = !context.value; }
+  }
+};
+
+let context = { value: false };
+const machine = createLightMachine(toggleConfig, implementations, (nextState) => {
+  console.log(`UI Update: Render state [${nextState}]`);
+});
+```
+`````
 
 ### Validation gates applied
 
-After producing the model, apply gates 1–23 from `references/slop-gates.md`. Report any failures.
-
-**Note:** Gates 06 (state names) and 07 (event names) use a **score/tolerance** system defined in `scripts/linguistic-analyzer.js`. Scores ≥ 0.7 produce non-blocking warnings instead of errors. Scores < 0.7 are hard failures.
-
-**Fast-track:** `node scripts/validate-model.js model.json --light` skips linguistic warnings and renders a compact ASCII diagram for quick feedback.
+After producing the model, run `node scripts/validate-model.js .state-machine/temp-model.json`. If it fails, fix the JSON and re-run until exit code 0.
 
 ---
 

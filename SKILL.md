@@ -5,7 +5,7 @@ description: >
   `model` (FSM from description), `implement` (code from model),
   `audit` (detect impossible states in existing code). Framework-agnostic,
   XState v5 compatible. Eliminates impossible states at design time.
-version: 1.2.2
+version: 1.2.3
 ---
 
 # state-machine Skill
@@ -30,7 +30,44 @@ You MUST strictly follow this algorithmic workflow for any user command:
 3. **Error Handling**: 
    - If the command fails (Exit code 1), read the script output, re-model the JSON fixing the broken gate, and repeat step 2.
    - Do NOT ask the user for help or show intermediate code until the script returns Exit code 0.
-4. **Final Output**: Generate the markdown block specified in `references/verb-dispatch.md` including the validated JSON and the ASCII diagram produced by `node scripts/ascii-viz.js .state-machine/temp-model.json`.
+4. **Final Output**: Return a markdown block with exactly **4 sections** in order:
+
+   **Section 1 — Behavior Specification**: Rephrase the user's description as a concise specification in English.
+
+   **Section 2 — Structural Contract**: Present the validated JSON inside a `json` code block. This is the exact JSON that passed validation.
+
+   **Section 3 — Transition Diagram**: Run `node scripts/ascii-viz.js .state-machine/temp-model.json` and include its output inside a code block.
+
+   **Section 4 — Production Implementation**: Generate a reference implementation using `createLightMachine` from `src/core/fsm.ts`. The code must:
+   - Declare the config object identical to the JSON contract
+   - Declare an `implementations` object with isolated `actions` and `guards` (side effects separated from logic)
+   - Initialize the machine with `createLightMachine(config, implementations, onStateChange)`
+   - Use descriptive action names (e.g., `fetchData`, `storeData`, `logError`)
+
+   Format:
+
+   ````
+   ## 1. Behavior Specification
+   ...
+
+   ## 2. Structural Contract (`model.json`)
+   ```json
+   { ... }
+   ```
+
+   ## 3. Transition Diagram (ASCII)
+   ```
+   ...
+   ```
+
+   ## 4. Production Implementation (`implement`)
+   ```ts
+   import { createLightMachine } from '...';
+   ...
+   ```
+   ````
+
+   Do NOT include any text before or after these 4 sections. Do NOT ask the user if they want the code — always generate it.
 
 ### `implement` Verb Execution
 1. **Read Contract**: Take the JSON validated in the prior step or provided by the user.
@@ -67,7 +104,7 @@ node scripts/ascii-viz.js path/to/model.json              # diagram only
 
 ## Output Formats (see `references/verb-dispatch.md`)
 
-- **model**: States, Transitions, Guards, Actions, ASCII Diagram, Invariants, ✅ Gates 1–13
+- **model**: Behavior Specification, Structural Contract (JSON), ASCII Diagram, Production Implementation, ✅ Gates 1–13
 - **implement**: Model recap, component code, tests, ✅ Gates 1–23
 - **audit**: Reconstructed model, impossible states, unhandled transitions, severity punch list, ✅ Gates 24–38
 
