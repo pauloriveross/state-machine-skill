@@ -5,7 +5,7 @@ description: >
   `model` (FSM from description), `implement` (code from model),
   `audit` (detect impossible states in existing code). Framework-agnostic,
   XState v5 compatible. Eliminates impossible states at design time.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # state-machine Skill

@@ -4,7 +4,7 @@
 
 **Model UI behavior before you code it. Eliminate impossible states before they exist.**
 
-[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.1.0)](https://www.npmjs.com/package/state-machine-skill)
+[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.2.0)](https://www.npmjs.com/package/state-machine-skill)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Works with Claude Code](https://img.shields.io/badge/Claude%20Code-ready-7C3AED)](https://claude.ai)
 [![Works with Cursor](https://img.shields.io/badge/Cursor-ready-000000)](https://cursor.com)
