@@ -314,7 +314,7 @@
     <div class="hero-left">
       <div class="hero-badge">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:nodePulse 2s infinite"></span>
-        v1.2.3 — Available Now
+        v1.3.0 — Available Now
       </div>
       <h1>No more <em>impossible</em> states</h1>
       <p>Model UI components as finite state machines before writing code. Compatible with Claude Code, Cursor, Windsurf, and OpenCode.</p>
@@ -398,8 +398,8 @@ switch (state) {
 <section class="section" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)" id="features">
   <div class="container">
     <div class="reveal" style="text-align:center;margin-bottom:48px">
-      <div class="section-title">Three verbs</div>
-      <h2 class="section-heading">Model. Implement. Audit.</h2>
+      <div class="section-title">Two verbs + auto-implement</div>
+      <h2 class="section-heading">Model. Audit.</h2>
     </div>
 
     <div class="verb-grid">
@@ -415,9 +415,9 @@ switch (state) {
       <div class="card card-glow reveal reveal-delay-2">
         <div class="verb-icon" style="color:var(--cyan);border-color:rgba(6,182,212,0.3)">{&gt;}</div>
         <h3 style="font-size:18px;font-weight:700;margin-bottom:8px">Implement</h3>
-        <p style="font-size:14px;color:var(--muted);line-height:1.7">Code is derived from the model, not the other way around. React, Vue, Svelte, or vanilla. Every component carries the guarantee stamp: no impossible states.</p>
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">Auto-prompted after every <code>model</code>. The agent scans your project folders, confirms the target directory with you, and generates code + tests wired to <code>createLightMachine</code>.</p>
         <div style="margin-top:16px;padding:10px 12px;background:#080A0D;border-radius:6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--muted)">
-          <span style="color:var(--violet)">$</span> state-machine implement <span style="color:var(--cyan)">react "...</span>
+          <span style="color:var(--muted)">// No separate command — the agent asks you</span>
         </div>
       </div>
 
@@ -464,7 +464,7 @@ switch (state) {
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├────FETCH_SUCCESS→ Success<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└────FETCH_ERROR→ Error
           </div>
-          <div style="color:var(--muted);margin-top:8px;font-style:italic">Ready to implement.</div>
+          <div style="color:var(--muted);margin-top:8px;font-style:italic">✅ Model ready. Ask user: implement now?</div>
         </div>
       </div>
     </div>

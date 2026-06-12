@@ -4,7 +4,7 @@
 
 **Model UI behavior before you code it. Eliminate impossible states before they exist.**
 
-[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.2.3)](https://www.npmjs.com/package/state-machine-skill)
+[![npm version](https://img.shields.io/npm/v/state-machine-skill?label=1.3.0)](https://www.npmjs.com/package/state-machine-skill)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Works with Claude Code](https://img.shields.io/badge/Claude%20Code-ready-7C3AED)](https://claude.ai)
 [![Works with Cursor](https://img.shields.io/badge/Cursor-ready-000000)](https://cursor.com)
@@ -44,19 +44,21 @@ Every impossible state is a bug waiting to happen. A race condition, a missed re
 
 ---
 
-## How it works: two-phase workflow
+## How it works: single-command workflow
 
 ```
-┌──────────┐     ┌──────────────┐     ┌────────────┐     ┌──────────┐
-│ Describe │────>│  model verb  │────>│ implement  │────>│  Ready   │
-│ behavior │     │  (blueprint) │     │ verb (code) │     │ component│
-│ in NL    │     │  .md output  │     │ .ts + .test │     │  shipped │
-└──────────┘     └──────────────┘     └────────────┘     └──────────┘
+┌──────────┐     ┌──────────────┐     ┌──────────────────┐     ┌──────────┐
+│ Describe │────>│  model verb  │────>│ Agent asks:      │────>│  Ready   │
+│ behavior │     │  (blueprint) │     │ "Implement now?" │     │ component│
+│ in NL    │     │  3 sections  │     │  → picks folder  │     │  shipped │
+└──────────┘     └──────────────┘     │  → generates     │     └──────────┘
+                                      │    code + tests  │
+                                      └──────────────────┘
 ```
 
-**Phase 1 — `model`**: You describe the component behavior in natural language. The agent produces a validated JSON contract + ASCII diagram saved as a `.md` file. This is the **blueprint** — committable design documentation.
+**`model` command**: You describe the component behavior in natural language. The agent produces 3 sections: Behavior Specification, validated JSON contract, and ASCII diagram. Then it asks if you want to generate the component code now.
 
-**Phase 2 — `implement`**: You point the agent to the blueprint. It injects the micro-runtime (`createLightMachine`), generates the component code wired to the state machine, and writes unit tests covering every transition.
+**Implementation**: If you accept, the agent scans your project directories, confirms the target folder with you, injects the micro-runtime (`createLightMachine`), generates the component code wired to the state machine, and writes unit tests covering every transition.
 
 ---
 
@@ -73,13 +75,13 @@ Every impossible state is a bug waiting to happen. A race condition, a missed re
 
 ---
 
-## Three verbs. One guarantee.
+## Two verbs. One guarantee.
 
-### `model` — From natural language to validated blueprint
+### `model` — From natural language to validated blueprint (with optional implementation)
 
 **Input:** A natural language description of component behavior.
 
-**Output:** A `.md` file containing the validated JSON contract + ASCII transition diagram.
+**Output:** 3 sections (Behavior Specification, validated JSON contract, ASCII diagram), then an auto-prompt to implement.
 
 **How the agent executes it:**
 
@@ -87,7 +89,9 @@ Every impossible state is a bug waiting to happen. A race condition, a missed re
 2. Saves to `.state-machine/temp-model.json`
 3. Runs `node scripts/validate-model.js .state-machine/temp-model.json`
 4. If validation fails, fixes the JSON and re-runs — **no intermediate output, no asking for help**
-5. On success, outputs the final markdown block with the validated JSON and ASCII diagram
+5. On success, outputs the 3-section markdown block
+6. Asks: "Do you want me to generate the component code from this model?"
+7. If yes, scans your project directories, asks which folder, generates code + tests
 
 **Example:**
 
@@ -98,9 +102,10 @@ Every impossible state is a bug waiting to happen. A race condition, a missed re
 The agent returns:
 
 `````markdown
-## Model: Toggle
+## 1. Behavior Specification
+A simple toggle switch with two states — On and Off. Clicking the toggle flips between the two states.
 
-### Contract (`model.json`)
+## 2. Structural Contract (`model.json`)
 
 ```json
 {
@@ -113,51 +118,33 @@ The agent returns:
 }
 ```
 
-### ASCII Diagram
+## 3. Transition Diagram (ASCII)
 
 ```
 ┌────────┐  TOGGLE  ┌────────┐
-│   Off  │────────>│   On   │
-└────────┘<────────└────────┘
-└────────┘  TOGGLE  └────────┘
+│  Off   │─────────>│   On   │
+└────────┘<─────────└────────┘
+             TOGGLE
 ```
 
 ✅ All 13 gates passed.
 `````
 
-This `.md` is saved in your project. Commit it alongside the component.
+Then the agent asks: *"Do you want me to generate the component code from this model? I can place it in your project."*
+
+If you accept, it scans for project folders, confirms the target directory, and generates the implementation.
 
 ---
 
-### `implement` — From blueprint to production code
+### Implementation (auto-prompted after `model`)
 
-**Input:** The validated model from the previous `model` step (or a model you provide).
+When you accept the post-model prompt, the agent:
 
-**Output:** Production component files injected into your project.
-
-**How the agent executes it:**
-
-1. Reads the validated JSON contract
-2. Copies `src/core/fsm.ts` into your project as the runtime (e.g., `components/ui/fsm.ts`)
-3. Generates the UI component wired to `createLightMachine`
-4. Writes unit tests that simulate 100% of transitions
-
-**Example:**
-
-```
-> state-machine model a modal with async loading...
-
-> state-machine implement the modal using createLightMachine in components/ui/Modal.tsx
-```
-
-The agent writes:
-
-```
-components/ui/
-├── fsm.ts              # Runtime (copied from src/core/fsm.ts)
-├── Modal.tsx           # Component wired to createLightMachine
-└── Modal.test.ts       # Tests covering every transition
-```
+1. Scans your project for `package.json`, `src/`, `components/`, `app/` directories
+2. Asks you to confirm the target folder
+3. Copies `src/core/fsm.ts` into that folder as `fsm.ts` (if not already present)
+4. Generates the UI component wired to `createLightMachine`
+5. Writes unit tests that simulate 100% of transitions
 
 **Every component carries a guarantee:**
 
@@ -300,7 +287,7 @@ For compound (nested) states with cross-hierarchy targets:
 
 ## 4 worked examples
 
-Each example demonstrates the full pipeline in the unified 4-section format: behavior specification → structural JSON contract → ASCII diagram → production implementation.
+Each example demonstrates the model output in the unified 3-section format: behavior specification → structural JSON contract → ASCII diagram.
 
 <details>
 <summary><b>📋 Modal with async loading</b> — 4 states, 5 events, 7 transitions</summary>
@@ -421,12 +408,12 @@ All scripts are zero-dependency. Exit code 0 = valid, 1 = invalid with gate repo
 | File | Purpose |
 |------|---------|
 | [`SKILL.md`](SKILL.md) | Mandatory execution protocol — tells the AI agent exactly how to handle each verb |
-| [`src/core/fsm.ts`](src/core/fsm.ts) | Injectable micro-runtime (`createLightMachine`) — copied into your project by `implement` |
+| [`src/core/fsm.ts`](src/core/fsm.ts) | Injectable micro-runtime (`createLightMachine`) — copied into your project during implementation |
 | [`schemas/fsm.schema.json`](schemas/fsm.schema.json) | Canonical JSON Schema for hierarchical FSM models |
 | [`scripts/validate-model.js`](scripts/validate-model.js) | Model validator — 13 gates + graph structural check, auto-detects flat/hierarchical format |
 | [`scripts/ascii-viz.js`](scripts/ascii-viz.js) | Terminal ASCII transition diagram renderer |
 | [`scripts/audit-processor.js`](scripts/audit-processor.js) | Boolean flag analyzer — detects impossible state combinations in legacy code |
-| [`references/verb-dispatch.md`](references/verb-dispatch.md) | Exact output format specification for each verb |
+| [`references/verb-dispatch.md`](references/verb-dispatch.md) | Exact output format specification for `model` and `audit` verbs |
 | [`references/slop-gates.md`](references/slop-gates.md) | 38 validation gates (model 1–13, code 14–23, audit 24–38) |
 | [`references/state-theory.md`](references/state-theory.md) | FSM/HFSM fundamentals applied to UI components |
 | [`references/component-patterns.md`](references/component-patterns.md) | 12 canonical UI patterns with pre-built models and invariants |

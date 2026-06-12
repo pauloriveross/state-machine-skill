@@ -1,18 +1,18 @@
 # Verb Dispatch
 
-> Public API of the state-machine skill. Every request must start with one of these three verbs.
+> Public API of the state-machine skill. Every request must start with one of these two verbs.
 
 ## How dispatch works
 
 The skill router reads the first word of the request. That word determines the pipeline:
 
 ```
-Request starts with "model"     → pipeline: NL → formal model → validation → output
-Request starts with "implement" → pipeline: NL → model → validation → code + tests
-Request starts with "audit"     → pipeline: code → reverse-model → analysis → report
+Request starts with "model" → pipeline: NL → formal model → validation → output
+                                → auto-prompt: implement? → discover folders → code + tests
+Request starts with "audit" → pipeline: code → reverse-model → analysis → report
 ```
 
-If the request does not start with one of these three verbs, the router prepends `model` and treats the entire request as the behavior description.
+If the request does not start with one of these two verbs, the router prepends `model` and treats the entire request as the behavior description.
 
 ---
 
@@ -34,7 +34,7 @@ model a modal dialog that opens when a button is clicked, shows a loading spinne
 
 ### Output requirements
 
-You MUST return exactly **4 sections**, in order, with no extra text before or after:
+You MUST return exactly **3 sections**, in order, with no extra text before or after:
 
 #### Section 1 — Behavior Specification
 
@@ -80,120 +80,40 @@ Format:
 ```
 ```
 
-#### Section 4 — Production Implementation (`implement`)
-
-Generate a reference implementation using `createLightMachine` from `src/core/fsm.ts`. The code MUST:
-
-1. **Declare config** — identical to the JSON contract in Section 2
-2. **Declare implementations** — isolate side effects into named `actions` and `guards` objects
-3. **Initialize the machine** — `createLightMachine(config, implementations, onStateChange)`
-4. **Use descriptive action names** — e.g., `fetchData`, `storeData`, `logError`, `clearData`
-
-Format:
-```
-## 4. Production Implementation (`implement`)
-```ts
-import { createLightMachine } from '../src/core/fsm';
-
-const config = { ... };
-const implementations = { actions: { ... }, guards: { ... } };
-const machine = createLightMachine(config, implementations, (nextState) => { ... });
-```
-```
-
-### Complete example output
-
-For a toggle, the agent produces:
-
-`````
-## 1. Behavior Specification
-A simple toggle switch with two states — On and Off. Clicking the toggle flips between the two states.
-
-## 2. Structural Contract (`model.json`)
-
-```json
-{
-  "id": "toggle",
-  "initial": "Off",
-  "states": {
-    "Off": { "type": "atomic", "on": { "TOGGLE": { "target": "On", "actions": ["onChange"] } } },
-    "On":  { "type": "atomic", "on": { "TOGGLE": { "target": "Off", "actions": ["onChange"] } } }
-  }
-}
-```
-
-## 3. Transition Diagram (ASCII)
-
-```
-┌────────┐  TOGGLE  ┌────────┐
-│  Off   │─────────>│   On   │
-└────────┘<─────────└────────┘
-             TOGGLE
-```
-
-## 4. Production Implementation (`implement`)
-
-```ts
-import { createLightMachine } from '../src/core/fsm';
-
-const toggleConfig = {
-  id: "toggle",
-  initial: "Off",
-  states: {
-    Off: { type: "atomic", on: { TOGGLE: { target: "On", actions: ["onChange"] } } },
-    On:  { type: "atomic", on: { TOGGLE: { target: "Off", actions: ["onChange"] } } }
-  }
-};
-
-const implementations = {
-  actions: {
-    onChange: (context: any) => { context.value = !context.value; }
-  }
-};
-
-let context = { value: false };
-const machine = createLightMachine(toggleConfig, implementations, (nextState) => {
-  console.log(`UI Update: Render state [${nextState}]`);
-});
-```
-`````
-
 ### Validation gates applied
 
 After producing the model, run `node scripts/validate-model.js .state-machine/temp-model.json`. If it fails, fix the JSON and re-run until exit code 0.
 
+### Post-model prompt
+
+After the 3 sections are output, the agent MUST ask the user:
+
+> "Do you want me to generate the component code from this model?"
+
+If the user accepts:
+
+1. **Discover project folders**: Scan the workspace for `package.json`, `src/`, `components/`, `app/` directories. Present the candidate folders to the user.
+2. **Confirm target folder**: Ask the user which folder should receive the component.
+3. **Execute the Implementation sub-flow** (see below).
+
 ---
 
-## `implement`
+## `implement` (sub-flow — not a user command)
 
-**Purpose:** Take a validated model and generate production-ready component code with embedded model and unit tests.
+This flow is executed by the agent after the user accepts the post-model prompt. It is NOT dispatched as a standalone verb.
 
-**Syntax:**
-```
-implement <framework> <behavior description>
-```
+**Purpose:** Take the validated model and generate production-ready component code with embedded model and unit tests.
 
-Or, after a `model` has been produced in the same conversation:
-```
-implement <framework>
-```
-
-**Supported frameworks:** `react`, `vue`, `svelte`, `vanilla` (see `references/framework-adapters.md`).
-
-**Example input:**
-```
-implement react a toggle switch that fetches data on toggle, shows loading, handles errors, and has optimistic UI
-```
+**Preconditions:**
+- A validated JSON model exists from the preceding `model` step
+- The user confirmed they want implementation
+- A target folder has been agreed upon
 
 ### Output requirements
 
-You MUST produce each of the following sections, in order:
+The agent MUST produce each of the following, in order:
 
-#### 1. Model recap
-
-Reproduce the full model (states, transitions, guards, actions, invariants) from the behavior description. If a `model` was produced earlier in the same conversation, reference it. Otherwise, run an implicit `model` step first.
-
-#### 2. Model embedded as comment
+#### 1. Model comment
 
 The first line of the generated file MUST contain the machine encoded as a comment:
 
@@ -203,34 +123,28 @@ The first line of the generated file MUST contain the machine encoded as a comme
 
 Pattern: `/* state-machine: <states> : <events> */`
 
+#### 2. Runtime injection
+
+Copy `src/core/fsm.ts` into the target folder as `fsm.ts` if it does not already exist.
+
 #### 3. Component code
 
-The component MUST be derived directly from the transition table. Every state maps to a render branch. Every event maps to a dispatch. Guards are implemented as conditionals before the dispatch.
+Generate the UI component using `createLightMachine`. The config object MUST be identical to the validated JSON contract. Every state maps to a render branch. Every event maps to a dispatch. Guards are implemented as conditionals before the dispatch.
 
 ```tsx
-function Modal() {
-  const [state, setState] = useState('Closed');
+import { createLightMachine } from './fsm';
 
-  function dispatch(event, payload) {
-    switch (state) {
-      case 'Closed':
-        if (event === 'OPEN') setState('Opening');
-        break;
-      case 'Loading':
-        if (event === 'FETCH_SUCCESS') setState('Success');
-        if (event === 'FETCH_ERROR') setState('Error');
-        break;
-      // ...
-    }
-  }
+const config = { ... }; // identical to validated JSON
 
-  switch (state) {
-    case 'Closed': return null;
-    case 'Loading': return <Spinner />;
-    case 'Success': return <Content />;
-    case 'Error': return <ErrorView onRetry={() => dispatch('RETRY')} />;
-  }
-}
+const implementations = {
+  actions: { ... },
+  guards: { ... }
+};
+
+let context = { ... };
+const machine = createLightMachine(config, implementations, (nextState) => {
+  // framework render hook
+});
 ```
 
 Do NOT add states that are not in the model. Do NOT add transitions that are not in the table.
@@ -240,28 +154,17 @@ Do NOT add states that are not in the model. Do NOT add transitions that are not
 Generate tests that verify every row of the transition table:
 
 ```tsx
-describe('Modal state machine', () => {
+describe('Component state machine', () => {
   it('transitions from Closed to Opening on OPEN', () => {
-    const { result } = renderHook(() => useModal());
-    act(() => result.current.dispatch('OPEN'));
-    expect(result.current.state).toBe('Opening');
+    // ...
   });
-
-  it('handles FETCH_SUCCESS from Loading', () => {
-    const { result } = renderHook(() => useModal());
-    act(() => result.current.dispatch('OPEN'));
-    act(() => /* advance animation */);
-    act(() => result.current.dispatch('FETCH_SUCCESS'));
-    expect(result.current.state).toBe('Success');
-  });
-
   // one test per transition row
 });
 ```
 
 #### 5. Implicit state warning
 
-If the implementation requires something not in the model (e.g., a "submitting" state for a form), emit a warning:
+If the implementation requires something not in the model, emit a warning:
 
 ```
 ⚠️ WARNING: The description mentions "submitting" but no Submitting state exists in the model.
@@ -357,7 +260,7 @@ List events that reach the component but have no handler in certain states.
 
 ```
 Would you like me to convert this component to use a proper state machine?
-Run `implement <framework> <description>` to generate a clean implementation.
+I can model the behavior and then generate a clean implementation.
 ```
 
 ### Validation gates applied
@@ -371,9 +274,8 @@ After producing the audit, apply gates 24–38 from `references/slop-gates.md`. 
 | Situation | Behavior |
 |-----------|----------|
 | No verb matched | Default to `model` |
-| Unsupported framework | List supported frameworks from `references/framework-adapters.md` |
 | File not found for audit | Request the code inline or provide the correct path |
-| Model validation fails | Return the model with failures annotated; do NOT proceed to `implement` |
+| Model validation fails | Return the model with failures annotated; do NOT proceed to implementation prompt |
 | Guard references undefined guard | Reject the model, list missing guard definitions |
 
 ## Router logic
@@ -381,9 +283,8 @@ After producing the audit, apply gates 24–38 from `references/slop-gates.md`. 
 ```pseudocode
 function dispatch(request):
     verb = extractFirstWord(request)
-    if verb == "model":    return handleModel(request.withoutFirstWord())
-    if verb == "implement": return handleImplement(request.withoutFirstWord())
-    if verb == "audit":    return handleAudit(request.withoutFirstWord())
+    if verb == "model": return handleModel(request.withoutFirstWord())
+    if verb == "audit": return handleAudit(request.withoutFirstWord())
     return handleModel(request)  // default
 ```
 
